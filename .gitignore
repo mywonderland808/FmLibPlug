@@ -1,0 +1,44 @@
+# Build
+build/
+cmake-build-*/
+out/
+Dist/
+Builds/
+
+# JUCE / FetchContent
+_deps/
+JUCE/
+clap-juce-extensions/
+.cache/
+
+# IDE / OS
+.DS_Store
+.idea/
+.vscode/
+*.xcuserstate
+xcuserdata/
+*.xcodeproj/project.xcworkspace/xcuserdata/
+*.user
+*.suo
+CMakeUserPresets.json
+
+# Local preset corpus (do not publish)
+Presets/
+
+# Compiled / packages
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+*.app/
+*.vst3/
+*.component/
+*.clap/
+*.lv2/
+
+# Secrets
+.env
+.env.*
+*.pem
