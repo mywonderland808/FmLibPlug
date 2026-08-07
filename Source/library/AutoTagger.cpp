@@ -1,4 +1,5 @@
 #include "library/AutoTagger.h"
+#include "util/StringUtils.h"
 #include <algorithm>
 #include <cctype>
 #include <cstring>
@@ -8,12 +9,6 @@ namespace fmlib
 
 namespace
 {
-std::string lower (std::string s)
-{
-    std::transform (s.begin(), s.end(), s.begin(), [] (unsigned char c) { return static_cast<char> (std::tolower (c)); });
-    return s;
-}
-
 void addUnique (std::vector<std::string>& tags, const char* t)
 {
     const std::string s (t);
@@ -55,7 +50,7 @@ bool matches (const std::string& original, const std::string& hay, const char* n
 std::vector<std::string> AutoTagger::tagsForVoice (const VoiceData&, const std::string& voiceName)
 {
     std::vector<std::string> tags;
-    const auto name = lower (voiceName);
+    const auto name = asciiLower (voiceName);
     if (name.empty())
         return tags;
 

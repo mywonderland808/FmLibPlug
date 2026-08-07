@@ -1,4 +1,5 @@
 #include "ui/DeviceBufferPanel.h"
+#include "util/StringUtils.h"
 
 namespace fmlib
 {
@@ -161,10 +162,10 @@ void DeviceBufferPanel::Model::paintListBoxItem (int row, juce::Graphics& g, int
     const auto& voices = owner->buf->getVoices();
     if (! juce::isPositiveAndBelow (row, static_cast<int> (voices.size())))
         return;
-    g.fillAll (selected ? juce::Colours::steelblue.withAlpha (0.35f) : juce::Colours::transparentBlack);
+    g.fillAll (selected ? owner->findColour (juce::TextButton::buttonOnColourId) : juce::Colours::transparentBlack);
     g.setColour (owner->findColour (juce::Label::textColourId));
     const auto& e = voices[static_cast<size_t> (row)];
-    auto label = juce::String::fromUTF8 (e.voiceName.c_str());
+    auto label = toJuce (e.voiceName);
     if (e.bankSlot > 0)
         label = juce::String (e.bankSlot) + ". " + label;
     g.drawText (label, 4, 0, w - 8, h, juce::Justification::centredLeft, true);

@@ -1,7 +1,6 @@
 #include "library/FolderScanner.h"
 #include "sysex/FormatDetect.h"
-#include <algorithm>
-#include <cctype>
+#include "util/StringUtils.h"
 #include <fstream>
 
 namespace fmlib
@@ -11,8 +10,7 @@ namespace
 {
 bool isSyxExtension (const std::filesystem::path& p)
 {
-    auto ext = p.extension().string();
-    std::transform (ext.begin(), ext.end(), ext.begin(), [] (unsigned char c) { return static_cast<char> (std::tolower (c)); });
+    const auto ext = asciiLower (p.extension().string());
     return ext == ".syx" || ext == ".dx7";
 }
 } // namespace

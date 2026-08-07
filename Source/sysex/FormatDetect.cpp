@@ -1,6 +1,5 @@
 #include "sysex/FormatDetect.h"
-#include <algorithm>
-#include <cctype>
+#include "util/StringUtils.h"
 #include <cstring>
 #include <fstream>
 
@@ -11,9 +10,7 @@ namespace
 {
 std::string lowerExt (const std::filesystem::path& p)
 {
-    auto ext = p.extension().string();
-    std::transform (ext.begin(), ext.end(), ext.begin(), [] (unsigned char c) { return static_cast<char> (std::tolower (c)); });
-    return ext;
+    return asciiLower (p.extension().string());
 }
 
 bool isDx7iiFormatByte (uint8_t format)

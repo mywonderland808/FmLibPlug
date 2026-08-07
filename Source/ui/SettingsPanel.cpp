@@ -1,4 +1,6 @@
 #include "ui/SettingsPanel.h"
+#include "ui/ThemePalette.h"
+#include "util/StringUtils.h"
 
 namespace fmlib
 {
@@ -93,59 +95,54 @@ void SettingsPanel::lookAndFeelChanged()
 
 void SettingsPanel::applyThemeColours (bool darkTheme)
 {
-    const auto text = darkTheme ? juce::Colour (0xffe8eaed) : juce::Colour (0xff202124);
-    const auto muted = darkTheme ? juce::Colour (0xffa8b0bb) : juce::Colour (0xff3c4043);
-    const auto widget = darkTheme ? juce::Colour (0xff252a31) : juce::Colour (0xffffffff);
-    const auto outline = darkTheme ? juce::Colour (0xff3a424d) : juce::Colour (0xff9aa0a6);
-    const auto bg = darkTheme ? juce::Colour (0xff1a1d21) : juce::Colour (0xffe8eaed);
-    const auto accent = darkTheme ? juce::Colour (0xff8ab4f8) : juce::Colour (0xff0b57d0);
+    const auto p = ThemePalette::forTheme (darkTheme);
 
-    checklist.setColour (juce::Label::textColourId, text);
-    foldersLabel.setColour (juce::Label::textColourId, text);
+    checklist.setColour (juce::Label::textColourId, p.text);
+    foldersLabel.setColour (juce::Label::textColourId, p.text);
     for (auto* l : { &midiInLabel, &midiOutLabel, &channelLabel, &pacingLabel, &noteLabel, &velLabel, &durLabel })
-        l->setColour (juce::Label::textColourId, text);
+        l->setColour (juce::Label::textColourId, p.text);
 
     for (auto* t : { &dark, &groupByBank, &showFileColumns, &hideDuplicates, &showTooltips })
-        t->setColour (juce::ToggleButton::textColourId, text);
+        t->setColour (juce::ToggleButton::textColourId, p.text);
 
     auto paintCombo = [&] (juce::ComboBox& c)
     {
-        c.setColour (juce::ComboBox::backgroundColourId, widget);
-        c.setColour (juce::ComboBox::buttonColourId, widget);
-        c.setColour (juce::ComboBox::textColourId, text);
-        c.setColour (juce::ComboBox::outlineColourId, outline);
-        c.setColour (juce::ComboBox::arrowColourId, muted);
-        c.setColour (juce::ComboBox::focusedOutlineColourId, accent);
+        c.setColour (juce::ComboBox::backgroundColourId, p.widget);
+        c.setColour (juce::ComboBox::buttonColourId, p.widget);
+        c.setColour (juce::ComboBox::textColourId, p.text);
+        c.setColour (juce::ComboBox::outlineColourId, p.outline);
+        c.setColour (juce::ComboBox::arrowColourId, p.muted);
+        c.setColour (juce::ComboBox::focusedOutlineColourId, p.accent);
     };
     paintCombo (midiIn);
     paintCombo (midiOut);
 
     auto paintSlider = [&] (juce::Slider& s)
     {
-        s.setColour (juce::Slider::backgroundColourId, bg);
-        s.setColour (juce::Slider::thumbColourId, accent);
-        s.setColour (juce::Slider::trackColourId, outline);
-        s.setColour (juce::Slider::textBoxTextColourId, text);
-        s.setColour (juce::Slider::textBoxBackgroundColourId, widget);
-        s.setColour (juce::Slider::textBoxOutlineColourId, outline);
-        s.setColour (juce::Slider::textBoxHighlightColourId, accent.withAlpha (0.35f));
+        s.setColour (juce::Slider::backgroundColourId, p.bg);
+        s.setColour (juce::Slider::thumbColourId, p.accent);
+        s.setColour (juce::Slider::trackColourId, p.outline);
+        s.setColour (juce::Slider::textBoxTextColourId, p.text);
+        s.setColour (juce::Slider::textBoxBackgroundColourId, p.widget);
+        s.setColour (juce::Slider::textBoxOutlineColourId, p.outline);
+        s.setColour (juce::Slider::textBoxHighlightColourId, p.accent.withAlpha (0.35f));
     };
     for (auto* s : { &channel, &pacing, &auditionNote, &auditionVel, &auditionMs })
         paintSlider (*s);
 
     auto paintButton = [&] (juce::TextButton& b)
     {
-        b.setColour (juce::TextButton::buttonColourId, widget);
-        b.setColour (juce::TextButton::buttonOnColourId, accent.withAlpha (0.35f));
-        b.setColour (juce::TextButton::textColourOffId, text);
-        b.setColour (juce::TextButton::textColourOnId, text);
+        b.setColour (juce::TextButton::buttonColourId, p.widget);
+        b.setColour (juce::TextButton::buttonOnColourId, p.accent.withAlpha (0.35f));
+        b.setColour (juce::TextButton::textColourOffId, p.text);
+        b.setColour (juce::TextButton::textColourOnId, p.text);
     };
     for (auto* b : { &addFolder, &removeFolder, &apply, &refreshMidi, &rescan, &autoTag, &resetTags })
         paintButton (*b);
 
-    folderList.setColour (juce::ListBox::backgroundColourId, widget);
-    folderList.setColour (juce::ListBox::outlineColourId, outline);
-    folderList.setColour (juce::ListBox::textColourId, text);
+    folderList.setColour (juce::ListBox::backgroundColourId, p.widget);
+    folderList.setColour (juce::ListBox::outlineColourId, p.outline);
+    folderList.setColour (juce::ListBox::textColourId, p.text);
 
     checklist.repaint();
     folderList.repaint();
@@ -166,7 +163,7 @@ void SettingsPanel::setFolderPaths (const std::vector<std::filesystem::path>& pa
 {
     folders.clear();
     for (const auto& p : paths)
-        folders.push_back (juce::String::fromUTF8 (p.string().c_str()));
+        folders.push_back (toJuce (p.string()));
     folderList.updateContent();
 }
 

@@ -1,19 +1,9 @@
 #include "library/TagStore.h"
+#include "util/StringUtils.h"
 #include <algorithm>
-#include <cctype>
 
 namespace fmlib
 {
-
-namespace
-{
-std::string lowerTag (std::string s)
-{
-    std::transform (s.begin(), s.end(), s.begin(), [] (unsigned char c) { return static_cast<char> (std::tolower (c)); });
-    return s;
-}
-} // namespace
-
 void TagStore::clear()
 {
     tagsById.clear();
@@ -22,7 +12,7 @@ void TagStore::clear()
 void TagStore::setTags (uint64_t contentId, std::vector<std::string> tags)
 {
     for (auto& t : tags)
-        t = lowerTag (std::move (t));
+        t = asciiLower (std::move (t));
     tags.erase (std::remove_if (tags.begin(), tags.end(), [] (const std::string& t) { return t.empty(); }), tags.end());
     if (tags.empty())
         tagsById.erase (contentId);
@@ -32,7 +22,7 @@ void TagStore::setTags (uint64_t contentId, std::vector<std::string> tags)
 
 void TagStore::addTag (uint64_t contentId, const std::string& tag)
 {
-    const auto t = lowerTag (tag);
+    const auto t = asciiLower (tag);
     if (t.empty())
         return;
     auto& v = tagsById[contentId];
@@ -42,7 +32,7 @@ void TagStore::addTag (uint64_t contentId, const std::string& tag)
 
 void TagStore::removeTag (uint64_t contentId, const std::string& tag)
 {
-    const auto t = lowerTag (tag);
+    const auto t = asciiLower (tag);
     auto it = tagsById.find (contentId);
     if (it == tagsById.end())
         return;
@@ -67,7 +57,7 @@ std::vector<std::string> TagStore::getTags (uint64_t contentId) const
 
 bool TagStore::hasTag (uint64_t contentId, const std::string& tag) const
 {
-    const auto t = lowerTag (tag);
+    const auto t = asciiLower (tag);
     auto it = tagsById.find (contentId);
     if (it == tagsById.end())
         return false;
