@@ -37,11 +37,25 @@ TEST_CASE ("BrowserList buildRows inserts section headers", "[library][browser]"
         voiceAt ("/a/a.syx", 2, "A2"),
         voiceAt ("/b/b.syx", 1, "B1"),
     });
-    const auto rows = BrowserList::buildRows (voices, true);
+    const auto rows = BrowserList::buildRows (std::move (voices), true);
     REQUIRE (rows.size() == 5);
     REQUIRE (rows[0].kind == BrowserRowKind::sectionHeader);
+    REQUIRE (rows[0].entry.voiceName.empty());
+    REQUIRE (rows[0].bankPath == "/a/a.syx");
     REQUIRE (rows[1].kind == BrowserRowKind::voice);
     REQUIRE (rows[3].kind == BrowserRowKind::sectionHeader);
+}
+
+TEST_CASE ("BrowserList buildRows flat has no headers", "[library][browser]")
+{
+    auto voices = BrowserList::sortGrouped ({
+        voiceAt ("/a/a.syx", 1, "A1"),
+        voiceAt ("/b/b.syx", 1, "B1"),
+    });
+    const auto rows = BrowserList::buildRows (std::move (voices), false);
+    REQUIRE (rows.size() == 2);
+    REQUIRE (rows[0].kind == BrowserRowKind::voice);
+    REQUIRE (rows[1].kind == BrowserRowKind::voice);
 }
 
 TEST_CASE ("BrowserList prev next bank jumps", "[library][browser]")
@@ -52,7 +66,7 @@ TEST_CASE ("BrowserList prev next bank jumps", "[library][browser]")
         voiceAt ("/b/b.syx", 1, "B1"),
         voiceAt ("/c/c.syx", 1, "C1"),
     });
-    const auto rows = BrowserList::buildRows (voices, true);
+    const auto rows = BrowserList::buildRows (std::move (voices), true);
     // rows: H A1 A2 H B1 H C1
     REQUIRE_FALSE (BrowserList::prevBankRow (rows, 1).has_value());
     const auto next = BrowserList::nextBankRow (rows, 1);
@@ -62,4 +76,14 @@ TEST_CASE ("BrowserList prev next bank jumps", "[library][browser]")
     REQUIRE (prev.has_value());
     REQUIRE (rows[static_cast<size_t> (*prev)].entry.voiceName == "A1");
     REQUIRE_FALSE (BrowserList::nextBankRow (rows, static_cast<int> (rows.size()) - 1).has_value());
+}
+
+TEST_CASE ("BrowserList sortGrouped treats missing slot as last", "[library][browser]")
+{
+    auto out = BrowserList::sortGrouped ({
+        voiceAt ("/a/a.syx", 0, "NoSlot"),
+        voiceAt ("/a/a.syx", 1, "Slot1"),
+    });
+    REQUIRE (out[0].voiceName == "Slot1");
+    REQUIRE (out[1].voiceName == "NoSlot");
 }

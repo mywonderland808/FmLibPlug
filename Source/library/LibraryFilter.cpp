@@ -1,5 +1,5 @@
 #include "library/LibraryFilter.h"
-#include <algorithm>
+#include "util/StringUtils.h"
 #include <cctype>
 #include <unordered_map>
 #include <unordered_set>
@@ -9,12 +9,6 @@ namespace fmlib
 
 namespace
 {
-std::string lower (std::string s)
-{
-    std::transform (s.begin(), s.end(), s.begin(), [] (unsigned char c) { return static_cast<char> (std::tolower (c)); });
-    return s;
-}
-
 void trimInPlace (std::string& text)
 {
     while (! text.empty() && std::isspace (static_cast<unsigned char> (text.front())))
@@ -33,7 +27,7 @@ bool contains (const std::string& hayLower, const std::string& needleLower)
 std::vector<std::string> splitKeep (const std::string& text, const std::string& delimLower)
 {
     std::vector<std::string> parts;
-    const auto low = lower (text);
+    const auto low = asciiLower (text);
     size_t start = 0;
     while (start <= text.size())
     {
@@ -53,7 +47,7 @@ LibraryFilterAtom parseAtom (std::string raw)
 {
     trimInPlace (raw);
     LibraryFilterAtom a;
-    const auto low = lower (raw);
+    const auto low = asciiLower (raw);
     if (low.rfind ("tag:", 0) == 0)
     {
         a.kind = LibraryFilterAtom::Kind::tag;
@@ -76,9 +70,9 @@ LibraryFilterAndGroup parseAndGroup (const std::string& clause)
         trimInPlace (piece);
         if (piece.empty())
             continue;
-        // Also treat whitespace-separated tag: tokens as AND atoms
         std::string cur;
-        auto flush = [&] {
+        auto flush = [&]
+        {
             trimInPlace (cur);
             if (! cur.empty())
             {
@@ -92,8 +86,7 @@ LibraryFilterAndGroup parseAndGroup (const std::string& clause)
         {
             if (std::isspace (static_cast<unsigned char> (piece[i])))
             {
-                // If current token is tag: flush; else keep building multi-word text
-                const auto lowCur = lower (cur);
+                const auto lowCur = asciiLower (cur);
                 if (lowCur.rfind ("tag:", 0) == 0)
                     flush();
                 else
@@ -120,9 +113,9 @@ bool atomMatches (const LibraryFilterAtom& atom, const PatchEntry& e, const TagS
 
     if (atom.value.empty())
         return true;
-    const auto& vn = e.voiceNameLower.empty() ? lower (e.voiceName) : e.voiceNameLower;
-    const auto& fn = e.fileNameLower.empty() ? lower (e.fileName) : e.fileNameLower;
-    const auto& rp = e.relativePathLower.empty() ? lower (e.relativePath) : e.relativePathLower;
+    const auto& vn = e.voiceNameLower.empty() ? asciiLower (e.voiceName) : e.voiceNameLower;
+    const auto& fn = e.fileNameLower.empty() ? asciiLower (e.fileName) : e.fileNameLower;
+    const auto& rp = e.relativePathLower.empty() ? asciiLower (e.relativePath) : e.relativePathLower;
     return contains (vn, atom.value) || contains (fn, atom.value) || contains (rp, atom.value);
 }
 
@@ -145,7 +138,7 @@ LibraryFilterQuery LibraryFilter::parse (const std::string& raw, bool favoritesT
 
     auto stripToken = [&] (const std::string& token, auto onFound)
     {
-        const auto pos = lower (text).find (token);
+        const auto pos = asciiLower (text).find (token);
         if (pos != std::string::npos)
         {
             onFound();
@@ -176,44 +169,17 @@ LibraryFilterQuery LibraryFilter::parse (const std::string& raw, bool favoritesT
         }
     }
 
-    // Legacy fields for simple callers / older tests
-    if (q.orGroups.size() == 1 && q.orGroups[0].atoms.size() == 1)
-    {
-        const auto& a = q.orGroups[0].atoms[0];
-        if (a.kind == LibraryFilterAtom::Kind::tag)
-            q.tag = a.value;
-        else
-            q.text = a.value;
-    }
-    else if (q.orGroups.size() == 1)
-    {
-        // Concatenate text atoms for legacy .text (best-effort)
-        std::string joined;
-        for (const auto& a : q.orGroups[0].atoms)
-        {
-            if (a.kind == LibraryFilterAtom::Kind::tag && q.tag.empty())
-                q.tag = a.value;
-            if (a.kind == LibraryFilterAtom::Kind::text)
-            {
-                if (! joined.empty())
-                    joined += " ";
-                joined += a.value;
-            }
-        }
-        q.text = joined;
-    }
-
     return q;
 }
 
-std::vector<PatchEntry> LibraryFilter::apply (const std::vector<PatchEntry>& all,
+std::vector<PatchEntry> LibraryFilter::apply (std::vector<PatchEntry> all,
                                               const LibraryFilterQuery& query,
                                               const FavoritesStore& favorites,
                                               const TagStore* tags,
                                               const std::unordered_set<uint64_t>* recentIds)
 {
     std::unordered_set<uint64_t> dupeIds;
-    if (query.duplicatesOnly || query.hideDuplicates)
+    if (query.duplicatesOnly)
     {
         std::unordered_map<uint64_t, int> counts;
         counts.reserve (all.size());
@@ -224,26 +190,14 @@ std::vector<PatchEntry> LibraryFilter::apply (const std::vector<PatchEntry>& all
                 dupeIds.insert (id);
     }
 
-    // dupe:/dup: must show every copy — ignore hide-duplicates for that query
-    const bool hideDupes = query.hideDuplicates && ! query.duplicatesOnly;
-
-    std::unordered_set<uint64_t> seen;
-    if (hideDupes)
-        seen.reserve (all.size());
-
     std::vector<PatchEntry> out;
     out.reserve (all.size());
-    for (const auto& e : all)
+    for (auto& e : all)
     {
         if (query.favoritesOnly && ! favorites.isFavorite (e.contentId))
             continue;
         if (query.duplicatesOnly && dupeIds.count (e.contentId) == 0)
             continue;
-        if (hideDupes)
-        {
-            if (! seen.insert (e.contentId).second)
-                continue;
-        }
         if (query.recentOnly)
         {
             if (recentIds == nullptr || recentIds->count (e.contentId) == 0)
@@ -264,41 +218,23 @@ std::vector<PatchEntry> LibraryFilter::apply (const std::vector<PatchEntry>& all
             if (! any)
                 continue;
         }
-        else
-        {
-            // Legacy direct field setters (tests / callers that skip parse)
-            if (! query.tag.empty())
-            {
-                if (tags == nullptr || ! tags->hasTag (e.contentId, query.tag))
-                    continue;
-            }
-            if (! query.text.empty())
-            {
-                const auto needle = lower (query.text);
-                const auto& vn = e.voiceNameLower.empty() ? lower (e.voiceName) : e.voiceNameLower;
-                const auto& fn = e.fileNameLower.empty() ? lower (e.fileName) : e.fileNameLower;
-                const auto& rp = e.relativePathLower.empty() ? lower (e.relativePath) : e.relativePathLower;
-                if (! contains (vn, needle) && ! contains (fn, needle) && ! contains (rp, needle))
-                    continue;
-            }
-        }
 
-        out.push_back (e);
+        out.push_back (std::move (e));
     }
     return out;
 }
 
-std::vector<PatchEntry> LibraryFilter::keepFirstByContentId (const std::vector<PatchEntry>& voices)
+std::vector<PatchEntry> LibraryFilter::keepFirstByContentId (std::vector<PatchEntry> voices)
 {
     std::unordered_set<uint64_t> seen;
     seen.reserve (voices.size());
     std::vector<PatchEntry> out;
     out.reserve (voices.size());
-    for (const auto& e : voices)
+    for (auto& e : voices)
     {
         if (! seen.insert (e.contentId).second)
             continue;
-        out.push_back (e);
+        out.push_back (std::move (e));
     }
     return out;
 }

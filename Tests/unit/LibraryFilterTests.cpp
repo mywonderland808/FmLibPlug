@@ -13,7 +13,15 @@ static PatchEntry entryWith (const std::string& name, const std::string& file, u
     e.fileName = file;
     e.relativePath = "folder/" + file;
     e.contentId = id;
+    e.refreshSearchCache();
     return e;
+}
+
+static std::string firstTextAtom (const LibraryFilterQuery& q)
+{
+    if (q.orGroups.empty() || q.orGroups[0].atoms.empty())
+        return {};
+    return q.orGroups[0].atoms[0].value;
 }
 
 TEST_CASE ("LibraryFilter parse fav and star tokens", "[library][filter]")
@@ -21,17 +29,18 @@ TEST_CASE ("LibraryFilter parse fav and star tokens", "[library][filter]")
     {
         const auto q = LibraryFilter::parse ("foo fav: bar", false);
         REQUIRE (q.favoritesOnly);
-        REQUIRE (q.text == "foo  bar");
+        REQUIRE (firstTextAtom (q).find ("foo") != std::string::npos);
+        REQUIRE (firstTextAtom (q).find ("bar") != std::string::npos);
     }
     {
         const auto q = LibraryFilter::parse ("star: brass", false);
         REQUIRE (q.favoritesOnly);
-        REQUIRE (q.text == "brass");
+        REQUIRE (firstTextAtom (q) == "brass");
     }
     {
         const auto q = LibraryFilter::parse ("piano", true);
         REQUIRE (q.favoritesOnly);
-        REQUIRE (q.text == "piano");
+        REQUIRE (firstTextAtom (q) == "piano");
     }
 }
 
@@ -47,8 +56,7 @@ TEST_CASE ("LibraryFilter apply text and favorites", "[library][filter]")
     };
 
     {
-        LibraryFilterQuery q;
-        q.text = "bras";
+        const auto q = LibraryFilter::parse ("bras", false);
         const auto out = LibraryFilter::apply (all, q, favs);
         REQUIRE (out.size() == 1);
         REQUIRE (out.front().voiceName == "Brass Pad");
@@ -98,8 +106,24 @@ TEST_CASE ("LibraryFilter keepFirstByContentId respects input order", "[library]
         entryWith ("DropMe", "a.syx", 42),
         entryWith ("Other", "c.syx", 7)
     };
-    const auto out = LibraryFilter::keepFirstByContentId (voices);
+    const auto out = LibraryFilter::keepFirstByContentId (std::move (voices));
     REQUIRE (out.size() == 2);
     REQUIRE (out[0].voiceName == "KeepMe");
     REQUIRE (out[1].voiceName == "Other");
+}
+
+TEST_CASE ("LibraryFilter dupe: keeps only duplicated contentIds", "[library][filter][dupes]")
+{
+    FavoritesStore favs;
+    std::vector<PatchEntry> all {
+        entryWith ("A1", "a.syx", 1),
+        entryWith ("A2", "b.syx", 1),
+        entryWith ("Solo", "c.syx", 2)
+    };
+    const auto q = LibraryFilter::parse ("dupe:", false);
+    REQUIRE (q.duplicatesOnly);
+    const auto out = LibraryFilter::apply (std::move (all), q, favs);
+    REQUIRE (out.size() == 2);
+    REQUIRE (out[0].contentId == 1);
+    REQUIRE (out[1].contentId == 1);
 }

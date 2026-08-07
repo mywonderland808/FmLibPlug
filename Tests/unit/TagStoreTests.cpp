@@ -44,7 +44,9 @@ TEST_CASE ("LibraryFilter tag token", "[library][filter][tags]")
     all[0].refreshSearchCache();
 
     const auto q = LibraryFilter::parse ("tag:brass", false);
-    REQUIRE (q.tag == "brass");
+    REQUIRE_FALSE (q.orGroups.empty());
+    REQUIRE (q.orGroups[0].atoms[0].kind == LibraryFilterAtom::Kind::tag);
+    REQUIRE (q.orGroups[0].atoms[0].value == "brass");
     REQUIRE (LibraryFilter::apply (all, q, favs, &tags).size() == 1);
     REQUIRE (LibraryFilter::apply (all, q, favs, nullptr).empty());
 }

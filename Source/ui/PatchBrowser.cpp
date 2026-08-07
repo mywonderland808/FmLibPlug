@@ -1,5 +1,7 @@
 #include "ui/PatchBrowser.h"
 #include "library/LibraryFilter.h"
+#include "ui/ThemePalette.h"
+#include "util/StringUtils.h"
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
@@ -526,18 +528,16 @@ void PatchBrowser::rebuildFiltered()
             ++dupeVoices;
 
     auto q = LibraryFilter::parse (search.getText().toStdString(), favOnly.getToggleState());
-    // Dedupe after sort so the kept copy matches the active column order.
-    q.hideDuplicates = false;
     const auto recentIds = recentStore != nullptr ? recentStore->contentIds() : std::unordered_set<uint64_t> {};
     const auto* recentPtr = (q.recentOnly && recentStore != nullptr) ? &recentIds : nullptr;
-    auto voices = LibraryFilter::apply (scoped, q, *store, tagStore, recentPtr);
+    auto voices = LibraryFilter::apply (std::move (scoped), q, *store, tagStore, recentPtr);
 
     const bool grouping = bankFileView && groupByBank && q.orGroups.empty() && ! q.duplicatesOnly;
     applyColumnSort (voices, grouping);
     if (hideDuplicates && ! q.duplicatesOnly)
-        voices = LibraryFilter::keepFirstByContentId (voices);
+        voices = LibraryFilter::keepFirstByContentId (std::move (voices));
 
-    rows = BrowserList::buildRows (voices, grouping);
+    rows = BrowserList::buildRows (std::move (voices), grouping);
     lastSentRow = -1;
 
     int shown = 0;
@@ -564,7 +564,7 @@ void PatchBrowser::updateStickyHeader()
     }
 
     const bool dark = findColour (juce::ResizableWindow::backgroundColourId).getBrightness() < 0.5f;
-    stickyBank.setColour (juce::Label::backgroundColourId, dark ? juce::Colour (0xff3a4554) : juce::Colour (0xffc5d4eb));
+    stickyBank.setColour (juce::Label::backgroundColourId, ThemePalette::forTheme (dark).stickyHeader);
     stickyBank.setColour (juce::Label::textColourId, findColour (juce::Label::textColourId));
 
     int row = table.getSelectedRow();
@@ -579,21 +579,21 @@ void PatchBrowser::updateStickyHeader()
     int i = row;
     while (i > 0 && rows[static_cast<size_t> (i)].kind == BrowserRowKind::voice
            && rows[static_cast<size_t> (i - 1)].kind == BrowserRowKind::voice
-           && rows[static_cast<size_t> (i)].entry.absolutePath
-                  == rows[static_cast<size_t> (i - 1)].entry.absolutePath)
+           && rows[static_cast<size_t> (i)].bankPath
+                  == rows[static_cast<size_t> (i - 1)].bankPath)
         --i;
     if (i > 0 && rows[static_cast<size_t> (i - 1)].kind == BrowserRowKind::sectionHeader)
         --i;
 
     if (rows[static_cast<size_t> (i)].kind == BrowserRowKind::sectionHeader)
     {
-        stickyBank.setText ("Bank: " + juce::String::fromUTF8 (rows[static_cast<size_t> (i)].sectionLabel.c_str())
+        stickyBank.setText ("Bank: " + toJuce (rows[static_cast<size_t> (i)].sectionLabel)
                                 + "  (" + juce::String (rows[static_cast<size_t> (i)].sectionVoiceCount) + " voices)",
                             juce::dontSendNotification);
     }
     else if (rows[static_cast<size_t> (row)].kind == BrowserRowKind::voice)
     {
-        stickyBank.setText ("Bank: " + juce::String::fromUTF8 (rows[static_cast<size_t> (row)].entry.fileName.c_str()),
+        stickyBank.setText ("Bank: " + toJuce (rows[static_cast<size_t> (row)].entry.fileName),
                             juce::dontSendNotification);
     }
 }
@@ -610,7 +610,7 @@ void PatchBrowser::paintRowBackground (juce::Graphics& g, int row, int width, in
         && rows[static_cast<size_t> (row)].kind == BrowserRowKind::sectionHeader)
     {
         const bool dark = findColour (juce::ResizableWindow::backgroundColourId).getBrightness() < 0.5f;
-        g.fillAll (dark ? juce::Colour (0xff3a4554) : juce::Colour (0xffc5d4eb));
+        g.fillAll (ThemePalette::forTheme (dark).stickyHeader);
         return;
     }
     g.fillAll (selected ? findColour (juce::TextEditor::highlightColourId).withAlpha (0.45f)
@@ -774,21 +774,16 @@ void PatchBrowser::editTagsForRow (int row)
         return;
 
     const auto id = rows[static_cast<size_t> (row)].entry.contentId;
-    const auto name = juce::String::fromUTF8 (rows[static_cast<size_t> (row)].entry.voiceName.c_str());
+    const auto name = toJuce (rows[static_cast<size_t> (row)].entry.voiceName);
     auto current = tagStore->getTags (id);
 
     auto* aw = new juce::AlertWindow ("Edit tags",
                                       "Tags for \"" + name + "\" (comma-separated):",
                                       juce::AlertWindow::QuestionIcon);
-    auto& laf = getLookAndFeel();
-    aw->setLookAndFeel (&laf);
-    aw->setColour (juce::AlertWindow::backgroundColourId, laf.findColour (juce::AlertWindow::backgroundColourId));
-    aw->setColour (juce::AlertWindow::textColourId, laf.findColour (juce::AlertWindow::textColourId));
-    aw->setColour (juce::AlertWindow::outlineColourId, laf.findColour (juce::AlertWindow::outlineColourId));
-    aw->sendLookAndFeelChange();
+    themeAlertWindow (*aw, getLookAndFeel());
     juce::StringArray parts;
     for (const auto& t : current)
-        parts.add (juce::String::fromUTF8 (t.c_str()));
+        parts.add (toJuce (t));
     aw->addTextEditor ("tags", parts.joinIntoString (", "), "Tags");
     aw->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
     aw->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
