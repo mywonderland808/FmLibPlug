@@ -94,7 +94,7 @@ void MidiDeviceManager::close()
     outputName.clear();
 }
 
-bool MidiDeviceManager::sendRaw (const std::vector<uint8_t>& bytes)
+bool MidiDeviceManager::sendRaw (const std::vector<uint8_t>& bytes, bool pace)
 {
     if (! output)
     {
@@ -103,15 +103,15 @@ bool MidiDeviceManager::sendRaw (const std::vector<uint8_t>& bytes)
     }
     juce::MidiMessage msg (bytes.data(), static_cast<int> (bytes.size()));
     output->sendMessageNow (msg);
-    if (pacingMs > 0)
+    if (pace && pacingMs > 0)
         juce::Thread::sleep (pacingMs);
     return true;
 }
 
-bool MidiDeviceManager::sendVoice (const VoiceData& voice)
+bool MidiDeviceManager::sendVoice (const VoiceData& voice, bool pace)
 {
-    const auto ok = sendRaw (SysexMessages::makeSingleVoiceDump (voice, channel));
-    if (ok)
+    const auto ok = sendRaw (SysexMessages::makeSingleVoiceDump (voice, channel), pace);
+    if (ok && pace)
         setStatus ("Sent 1 voice");
     return ok;
 }

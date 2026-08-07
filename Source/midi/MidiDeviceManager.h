@@ -30,8 +30,9 @@ public:
     void setSysexPacingMs (int ms) { pacingMs = juce::jmax (0, ms); }
     int getSysexPacingMs() const { return pacingMs; }
 
-    bool sendRaw (const std::vector<uint8_t>& bytes);
-    bool sendVoice (const VoiceData& voice);
+    /** When pace is false, skip SysEx inter-message sleep (morph drag). */
+    bool sendRaw (const std::vector<uint8_t>& bytes, bool pace = true);
+    bool sendVoice (const VoiceData& voice, bool pace = true);
     bool sendBank (const std::array<VoiceData, kBankVoiceCount>& bank);
     bool requestDump (bool bank32);
     bool sendNoteOn (int note, int velocity);

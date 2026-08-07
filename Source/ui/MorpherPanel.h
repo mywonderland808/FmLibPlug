@@ -32,6 +32,7 @@ public:
     void paint (juce::Graphics& g) override;
     void mouseDown (const juce::MouseEvent& e) override;
     void mouseDrag (const juce::MouseEvent& e) override;
+    void mouseUp (const juce::MouseEvent& e) override;
 
     MorphFn onMorph;
     PersistFn onPresetsChanged;
@@ -43,7 +44,7 @@ private:
     void paintListBoxItem (int row, juce::Graphics& g, int w, int h, bool selected) override;
     void listBoxItemDoubleClicked (int row, const juce::MouseEvent&) override;
 
-    void updateFromPoint (juce::Point<float> p);
+    void updateFromPoint (juce::Point<float> p, bool forceEmit);
     void emitMorph();
     void refreshPresetList();
     void saveCurrentPreset();
@@ -56,6 +57,8 @@ private:
     juce::String cornerNames[4];
     bool cornerSet[4] { false, false, false, false };
     float posX = 0.0f, posY = 0.0f;
+    uint32_t lastMorphEmitMs = 0;
+    static constexpr uint32_t morphEmitMinMs = 20;
 
     juce::TextButton modeMorph { "Morph" }, modePresets { "Presets" };
     juce::TextButton assignA { "Set A" }, assignB { "Set B" }, assignC { "Set C" }, assignD { "Set D" };

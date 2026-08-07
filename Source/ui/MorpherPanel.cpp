@@ -201,21 +201,35 @@ void MorpherPanel::paint (juce::Graphics& g)
 void MorpherPanel::mouseDown (const juce::MouseEvent& e)
 {
     if (mode == Mode::morph)
-        updateFromPoint (e.position);
+        updateFromPoint (e.position, true);
 }
 
 void MorpherPanel::mouseDrag (const juce::MouseEvent& e)
 {
     if (mode == Mode::morph)
-        updateFromPoint (e.position);
+        updateFromPoint (e.position, false);
 }
 
-void MorpherPanel::updateFromPoint (juce::Point<float> p)
+void MorpherPanel::mouseUp (const juce::MouseEvent& e)
+{
+    if (mode == Mode::morph)
+        updateFromPoint (e.position, true);
+}
+
+void MorpherPanel::updateFromPoint (juce::Point<float> p, bool forceEmit)
 {
     if (padBounds.isEmpty())
         return;
     posX = juce::jlimit (0.0f, 1.0f, (p.x - (float) padBounds.getX()) / (float) padBounds.getWidth());
     posY = juce::jlimit (0.0f, 1.0f, (p.y - (float) padBounds.getY()) / (float) padBounds.getHeight());
+
+    const auto now = juce::Time::getMillisecondCounter();
+    if (! forceEmit && (now - lastMorphEmitMs) < morphEmitMinMs)
+    {
+        repaint();
+        return;
+    }
+    lastMorphEmitMs = now;
     emitMorph();
     repaint();
 }
