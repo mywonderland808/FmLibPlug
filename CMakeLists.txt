@@ -66,7 +66,6 @@ target_sources(FmLibPlug
     Source/library/BrowserList.cpp
     Source/library/TagStore.cpp
     Source/library/AutoTagger.cpp
-    Source/library/DuplicateDetector.cpp
     Source/library/RecentStore.cpp
     Source/library/MorphPresetStore.cpp
     Source/library/PatchEntry.cpp
@@ -75,9 +74,7 @@ target_sources(FmLibPlug
     Source/sysex/SysexParser.cpp
     Source/sysex/SysexMessages.cpp
     Source/sysex/FormatDetect.cpp
-    Source/sysex/AuditionMidi.cpp
     Source/sysex/VoiceMorpher.cpp
-    Source/sysex/FunctionDump.cpp
     Source/midi/MidiDeviceManager.cpp
     Source/ui/PatchBrowser.cpp
     Source/ui/DeviceBufferPanel.cpp
@@ -85,8 +82,21 @@ target_sources(FmLibPlug
     Source/ui/LookAndFeel_FmLibPlug.cpp
     Source/ui/MorpherPanel.cpp
     Source/prefs/AppPreferences.cpp
-    Source/BuildId.cpp
 )
+
+# Build stamp lives out of tree so `make build` does not dirty Source/.
+set(FMLIBPLUG_GENERATED_DIR "${CMAKE_BINARY_DIR}/generated")
+set(FMLIBPLUG_BUILD_ID_CPP "${FMLIBPLUG_GENERATED_DIR}/BuildId.cpp")
+file(MAKE_DIRECTORY "${FMLIBPLUG_GENERATED_DIR}")
+if(NOT EXISTS "${FMLIBPLUG_BUILD_ID_CPP}")
+  file(WRITE "${FMLIBPLUG_BUILD_ID_CPP}"
+"#include \"BuildId.h\"
+namespace fmlib {
+const char* buildId() { return \"dev\"; }
+}
+")
+endif()
+target_sources(FmLibPlug PRIVATE "${FMLIBPLUG_BUILD_ID_CPP}")
 
 target_include_directories(FmLibPlug
   PRIVATE
@@ -192,17 +202,15 @@ if(FMLIBPLUG_BUILD_TESTS)
     Tests/unit/BrowserListTests.cpp
     Tests/unit/TagStoreTests.cpp
     Tests/unit/FormatDetectTests.cpp
-    Tests/unit/UndoAuditionTests.cpp
     Tests/unit/AutoTagDupeTests.cpp
     Tests/unit/RecentFilterTests.cpp
     Tests/unit/VoiceMorpherTests.cpp
+    Tests/unit/MorphPresetStoreTests.cpp
     Source/sysex/Dx7Formats.cpp
     Source/sysex/SysexParser.cpp
     Source/sysex/SysexMessages.cpp
     Source/sysex/FormatDetect.cpp
-    Source/sysex/AuditionMidi.cpp
     Source/sysex/VoiceMorpher.cpp
-    Source/sysex/FunctionDump.cpp
     Source/library/FolderScanner.cpp
     Source/library/PatchWriter.cpp
     Source/library/FavoritesStore.cpp
@@ -210,7 +218,6 @@ if(FMLIBPLUG_BUILD_TESTS)
     Source/library/BrowserList.cpp
     Source/library/TagStore.cpp
     Source/library/AutoTagger.cpp
-    Source/library/DuplicateDetector.cpp
     Source/library/RecentStore.cpp
     Source/library/PatchEntry.cpp
     Source/library/MorphPresetStore.cpp

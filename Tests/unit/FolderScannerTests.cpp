@@ -46,8 +46,9 @@ TEST_CASE ("FolderScanner respects cancel", "[library][scanner]")
     std::atomic<bool> cancel { true };
     FolderScanner scanner;
     const auto result = scanner.scan ({ root }, &cancel);
-    // Cancelled before/during — may be empty or partial; must not hang
-    REQUIRE (result.filesScanned >= 0);
+    REQUIRE (result.filesScanned == 0);
+    REQUIRE (result.voicesFound == 0);
+    REQUIRE (result.entries.empty());
 
     fs::remove_all (root);
 }
