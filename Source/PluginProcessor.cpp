@@ -2,6 +2,8 @@
 #include "PluginEditor.h"
 #include "library/AutoTagger.h"
 #include "sysex/SysexParser.h"
+#include <utility>
+#include <vector>
 
 FmLibPlugAudioProcessor::FmLibPlugAudioProcessor()
     : AudioProcessor (BusesProperties()
@@ -25,6 +27,10 @@ FmLibPlugAudioProcessor::FmLibPlugAudioProcessor()
 
 FmLibPlugAudioProcessor::~FmLibPlugAudioProcessor()
 {
+    ++autoTagEpoch;
+    autoTagCancel = true;
+    if (autoTagWorker.joinable())
+        autoTagWorker.join();
     auditionOff.stopTimer();
     if (lastAuditionNote >= 0)
         midi.sendNoteOff (lastAuditionNote);
@@ -117,7 +123,7 @@ void FmLibPlugAudioProcessor::sendVoice (const fmlib::VoiceData& voice)
 {
     const auto id = fmlib::contentIdFromVoice (voice);
     midi.sendVoice (voice);
-    recent.push ({ id, fmlib::voiceNameFromData (voice), {} });
+    recent.push (id);
 }
 
 void FmLibPlugAudioProcessor::auditionNote()
@@ -145,13 +151,45 @@ void FmLibPlugAudioProcessor::AuditionOffTimer::timerCallback()
     }
 }
 
-void FmLibPlugAudioProcessor::autoTagLibrary()
+void FmLibPlugAudioProcessor::autoTagLibrary (std::function<void()> onDone)
 {
-    // Merge only: never wipe tags the user set manually via the Tags editor.
-    for (const auto& e : library.getEntriesCopy())
-        for (const auto& t : fmlib::AutoTagger::tagsForVoice (e.voice, e.voiceName))
-            tags.addTag (e.contentId, t);
-    tags.saveToFile (tagsFile());
+    if (autoTagRunning.exchange (true))
+        return;
+
+    autoTagCancel = false;
+    const auto epoch = ++autoTagEpoch;
+    if (autoTagWorker.joinable())
+        autoTagWorker.join();
+
+    autoTagWorker = std::thread ([this, epoch, onDone = std::move (onDone)]
+    {
+        const auto entries = library.getEntriesCopy();
+        std::vector<std::pair<uint64_t, std::vector<std::string>>> batch;
+        batch.reserve (entries.size());
+        for (const auto& e : entries)
+        {
+            if (autoTagCancel.load() || autoTagEpoch.load() != epoch)
+                break;
+            batch.emplace_back (e.contentId, fmlib::AutoTagger::tagsForVoice (e.voice, e.voiceName));
+        }
+
+        juce::MessageManager::callAsync ([this, epoch, batch = std::move (batch), onDone]
+        {
+            if (autoTagEpoch.load() != epoch)
+            {
+                autoTagRunning = false;
+                return;
+            }
+            // Merge only: never wipe tags the user set manually via the Tags editor.
+            for (const auto& [id, tagList] : batch)
+                for (const auto& t : tagList)
+                    tags.addTag (id, t);
+            tags.saveToFile (tagsFile());
+            autoTagRunning = false;
+            if (onDone)
+                onDone();
+        });
+    });
 }
 
 void FmLibPlugAudioProcessor::handleIncomingSysex (const std::vector<uint8_t>& bytes)

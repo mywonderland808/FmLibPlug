@@ -9,6 +9,9 @@
 #include "midi/MidiDeviceManager.h"
 #include "prefs/AppPreferences.h"
 #include <juce_audio_processors/juce_audio_processors.h>
+#include <atomic>
+#include <functional>
+#include <thread>
 
 class FmLibPlugAudioProcessor : public juce::AudioProcessor
 {
@@ -53,7 +56,7 @@ public:
     void handleIncomingSysex (const std::vector<uint8_t>& bytes);
     void sendVoice (const fmlib::VoiceData& voice);
     void auditionNote();
-    void autoTagLibrary();
+    void autoTagLibrary (std::function<void()> onDone = {});
     juce::File tagsFile() const;
     juce::File morphPresetsFile() const;
 
@@ -66,6 +69,10 @@ private:
     } auditionOff;
 
     int lastAuditionNote = -1;
+    std::thread autoTagWorker;
+    std::atomic<bool> autoTagRunning { false };
+    std::atomic<bool> autoTagCancel { false };
+    std::atomic<uint64_t> autoTagEpoch { 0 };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (FmLibPlugAudioProcessor)
 };
