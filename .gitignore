@@ -15,6 +15,7 @@ clap-juce-extensions/
 .DS_Store
 .idea/
 .vscode/
+.cursor/
 *.xcuserstate
 xcuserdata/
 *.xcodeproj/project.xcworkspace/xcuserdata/
@@ -38,7 +39,13 @@ Presets/
 *.clap/
 *.lv2/
 
-# Secrets
+# Secrets / local machine config
 .env
 .env.*
 *.pem
+
+# Hardware MIDI test ports (machine-specific; copy from .example)
+Tests/hw-midi.local.json
+
+# Local planning notes (not published)
+docs/TODO-next.md
