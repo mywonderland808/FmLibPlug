@@ -108,7 +108,7 @@ write-stamp:
 	@mkdir -p "$(ARTEFACT_ROOT)"; \
 	stamp="$(ARTEFACT_ROOT)/BUILD_STAMP.txt"; \
 	{ \
-	  echo "version=1.0.0"; \
+	  echo "version=1.0.1"; \
 	  echo "config=$(CONFIG)"; \
 	  echo "built_utc=$$(date -u +%Y-%m-%dT%H:%M:%SZ)"; \
 	  echo "git=$$(git -C . rev-parse --short HEAD 2>/dev/null || echo unknown)"; \

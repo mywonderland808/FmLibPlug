@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-08-08
+
+### Changed
+- Morph pad throttles SysEx sends and skips pacing while dragging for smoother response
+- Auto-tag runs on a background worker so large libraries no longer freeze the UI
+- Build id is generated under `build/generated/` instead of rewriting `Source/BuildId.cpp`
+
+### Removed
+- Unused AuditionMidi, FunctionDump, and DuplicateDetector helpers (not part of the shipped plugin)
+
+### Fixed
+- Library filter / browser rebuilds copy less voice data on each search keystroke
+
 ## [1.0.0] - 2026-08-07
 
 ### Added

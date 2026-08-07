@@ -1,6 +1,6 @@
 # FmLibPlug
 
-**Version 1.0.0** — AGPL-3.0 JUCE 8 MIDI librarian for **Yamaha DX7 mkI / TX7** voice SysEx.
+**Version 1.0.1** — AGPL-3.0 JUCE 8 MIDI librarian for **Yamaha DX7 mkI / TX7** voice SysEx.
 
 Product name: **FmLibPlug**. Release notes: [CHANGELOG.md](CHANGELOG.md). Version source: `project(FmLibPlug VERSION ...)` in `CMakeLists.txt`.
 
