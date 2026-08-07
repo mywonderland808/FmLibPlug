@@ -2,6 +2,8 @@
 #include "BuildId.h"
 #include "library/PatchWriter.h"
 #include "sysex/SysexParser.h"
+#include "ui/ThemePalette.h"
+#include "util/StringUtils.h"
 
 FmLibPlugAudioProcessorEditor::FmLibPlugAudioProcessorEditor (FmLibPlugAudioProcessor& p)
     : AudioProcessorEditor (&p), plugin (p)
@@ -41,11 +43,9 @@ FmLibPlugAudioProcessorEditor::FmLibPlugAudioProcessorEditor (FmLibPlugAudioProc
 
     plugin.library.addListener ([safe = juce::Component::SafePointer<FmLibPlugAudioProcessorEditor> (this)]
     {
-        juce::MessageManager::callAsync ([safe]
-        {
-            if (safe != nullptr)
-                safe->refreshLibraryView();
-        });
+        // PatchLibrary::handleAsyncUpdate already runs on the message thread.
+        if (safe != nullptr)
+            safe->refreshLibraryView();
     });
 
     plugin.midi.setStatusCallback ([safe = juce::Component::SafePointer<FmLibPlugAudioProcessorEditor> (this)] (const juce::String& s)
@@ -137,15 +137,19 @@ FmLibPlugAudioProcessorEditor::FmLibPlugAudioProcessorEditor (FmLibPlugAudioProc
         restoreListFocus();
     };
 
-    morpher.onMorph = [this] (const fmlib::VoiceData& v) { plugin.sendVoice (v); };
+    morpher.onMorph = [this] (const fmlib::VoiceData& v)
+    {
+        // Morph drag: MIDI only, unpaced — skip recent ring / processor side effects.
+        plugin.midi.sendVoice (v, false);
+    };
     morpher.onPresetsChanged = [this] { plugin.persistPreferences(); };
     morpher.onRequestAssignCorner = [this] (int corner)
     {
         if (auto sel = browser.getSelectedVoice())
         {
-            morpher.setCorner (corner, sel->voice, juce::String::fromUTF8 (sel->voiceName.c_str()));
+            morpher.setCorner (corner, sel->voice, fmlib::toJuce (sel->voiceName));
             setMidiStatus ("Assigned corner " + juce::String::charToString (static_cast<juce::juce_wchar> ('A' + corner))
-                                + " <- " + juce::String::fromUTF8 (sel->voiceName.c_str()));
+                                + " <- " + fmlib::toJuce (sel->voiceName));
         }
         else
         {
@@ -208,20 +212,21 @@ FmLibPlugAudioProcessorEditor::FmLibPlugAudioProcessorEditor (FmLibPlugAudioProc
     settings.onApply = [this] { applySettingsFromPanel(); };
     settings.onAutoTag = [this]
     {
-        plugin.autoTagLibrary();
-        refreshLibraryView();
-        setMidiStatus ("Auto-tagged library (see Tags column; click Tags to edit)");
+        setMidiStatus ("Auto-tagging library…");
+        plugin.autoTagLibrary ([safe = juce::Component::SafePointer<FmLibPlugAudioProcessorEditor> (this)]
+        {
+            if (safe == nullptr)
+                return;
+            safe->refreshLibraryView();
+            safe->setMidiStatus ("Auto-tagged library (see Tags column; click Tags to edit)");
+        });
     };
     settings.onResetTags = [this]
     {
         auto* aw = new juce::AlertWindow ("Reset all tags",
                                           "Delete every tag for every voice? This cannot be undone.",
                                           juce::AlertWindow::WarningIcon);
-        aw->setLookAndFeel (&lnf);
-        aw->setColour (juce::AlertWindow::backgroundColourId, lnf.findColour (juce::AlertWindow::backgroundColourId));
-        aw->setColour (juce::AlertWindow::textColourId, lnf.findColour (juce::AlertWindow::textColourId));
-        aw->setColour (juce::AlertWindow::outlineColourId, lnf.findColour (juce::AlertWindow::outlineColourId));
-        aw->sendLookAndFeelChange();
+        fmlib::themeAlertWindow (*aw, lnf);
         aw->addButton ("Reset", 1, juce::KeyPress (juce::KeyPress::returnKey));
         aw->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
         aw->enterModalState (true, juce::ModalCallbackFunction::create ([this, aw] (int result)
@@ -270,7 +275,7 @@ FmLibPlugAudioProcessorEditor::~FmLibPlugAudioProcessorEditor()
 void FmLibPlugAudioProcessorEditor::syncChromeColours()
 {
     const auto text = lnf.findColour (juce::Label::textColourId);
-    const auto muted = plugin.prefs.darkTheme ? juce::Colour (0xffa8b0bb) : juce::Colour (0xff3c4043);
+    const auto muted = fmlib::ThemePalette::forTheme (plugin.prefs.darkTheme).muted;
     title.setColour (juce::Label::textColourId, text);
     subtitle.setColour (juce::Label::textColourId, muted);
     versionLabel.setColour (juce::Label::textColourId, muted);
@@ -496,8 +501,7 @@ void FmLibPlugAudioProcessorEditor::saveDeviceBuffer()
     }
 
     auto* aw = new juce::AlertWindow ("Save received presets", "File name (without .syx):", juce::AlertWindow::QuestionIcon);
-    aw->setLookAndFeel (&lnf);
-    aw->sendLookAndFeelChange();
+    fmlib::themeAlertWindow (*aw, lnf);
     aw->addTextEditor ("name", "ReceivedBank", "Name");
     aw->addComboBox ("folder", {}, "Destination folder");
     auto* box = aw->getComboBoxComponent ("folder");
