@@ -138,14 +138,15 @@ build: ensure-configure write-build-id
 	@echo "Next:  make install    # or: make plugins  (= build + install)"
 
 write-build-id:
-	@stamp=$$(date -u +%Y%m%dT%H%M%SZ); \
+	@mkdir -p "$(BUILD_DIR)/generated"; \
+	stamp=$$(date -u +%Y%m%dT%H%M%SZ); \
 	git=$$(git -C . rev-parse --short HEAD 2>/dev/null || echo nogit); \
 	id="$$git-$$stamp"; \
 	printf '%s\n' \
 		'#include "BuildId.h"' \
 		'namespace fmlib {' \
 		'const char* buildId() { return "'$$id'"; }' \
-		'}' > Source/BuildId.cpp; \
+		'}' > "$(BUILD_DIR)/generated/BuildId.cpp"; \
 	echo "Build id: $$id"
 
 # Convenience: build then install for hosts.
