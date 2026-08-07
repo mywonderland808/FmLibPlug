@@ -21,11 +21,6 @@ void copyName (VoiceData& out, const VoiceData& src)
 }
 } // namespace
 
-VoiceData VoiceMorpher::morph (const VoiceData& a, const VoiceData& b, float x, float y)
-{
-    return morph4 (a, b, a, b, x, y);
-}
-
 VoiceData VoiceMorpher::morph4 (const VoiceData& a, const VoiceData& b, const VoiceData& c, const VoiceData& d,
                                 float x, float y)
 {
@@ -40,7 +35,6 @@ VoiceData VoiceMorpher::morph4 (const VoiceData& a, const VoiceData& b, const Vo
         out[i] = lerpByte (top, bot, ty);
     }
 
-    // Name from nearest corner
     const VoiceData* nearest = &a;
     float best = tx * tx + ty * ty;
     const float dB = (1 - tx) * (1 - tx) + ty * ty;

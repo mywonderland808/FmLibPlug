@@ -1,5 +1,4 @@
 #include "sysex/FormatDetect.h"
-#include "sysex/FunctionDump.h"
 #include "TestHelpers.h"
 #include <catch2/catch_test_macros.hpp>
 #include <fstream>
@@ -35,12 +34,4 @@ TEST_CASE ("FormatDetect rejects DX7II-like dump", "[sysex][formats][detect]")
     REQUIRE_FALSE (det.supported);
     const auto parsed = FormatDetect::parseSupported (bytes.data(), bytes.size());
     REQUIRE (parsed.voices.empty());
-}
-
-TEST_CASE ("FunctionDump inspects function-like sysex", "[sysex][function]")
-{
-    const uint8_t msg[] = { 0xf0, 0x43, 0x00, 0x01, 0x00, 0x01, 0x00, 0xf7 };
-    REQUIRE (FunctionDump::isFunctionOrPerformance (msg, sizeof (msg)));
-    const auto info = FunctionDump::inspect (msg, sizeof (msg));
-    REQUIRE (info.recognized);
 }

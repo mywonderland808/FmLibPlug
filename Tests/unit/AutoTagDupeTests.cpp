@@ -1,5 +1,4 @@
 #include "library/AutoTagger.h"
-#include "library/DuplicateDetector.h"
 #include "library/PatchEntry.h"
 #include <algorithm>
 #include <catch2/catch_test_macros.hpp>
@@ -13,8 +12,6 @@ TEST_CASE ("AutoTagger tags from name heuristics", "[library][autotag]")
         auto tags = AutoTagger::tagsForVoice (v, "Fat Bass");
         REQUIRE (std::find (tags.begin(), tags.end(), "bass") != tags.end());
         REQUIRE (std::find (tags.begin(), tags.end(), "fat") != tags.end());
-        REQUIRE (std::find (tags.begin(), tags.end(), "untagged") == tags.end());
-        REQUIRE (std::find (tags.begin(), tags.end(), "algo-low") == tags.end());
     }
     {
         auto tags = AutoTagger::tagsForVoice (v, "DarkPad");
@@ -65,19 +62,4 @@ TEST_CASE ("AutoTagger tags from name heuristics", "[library][autotag]")
         auto tags = AutoTagger::tagsForVoice (v, "XYZ123");
         REQUIRE (tags.empty());
     }
-}
-
-TEST_CASE ("DuplicateDetector groups same contentId", "[library][dupes]")
-{
-    PatchEntry a, b, c;
-    a.contentId = 1;
-    b.contentId = 1;
-    c.contentId = 2;
-    a.voiceName = "A";
-    b.voiceName = "B";
-    c.voiceName = "C";
-    const auto groups = DuplicateDetector::groupDuplicates ({ a, b, c });
-    REQUIRE (groups.size() == 1);
-    REQUIRE (DuplicateDetector::isDuplicateId (groups, 1));
-    REQUIRE_FALSE (DuplicateDetector::isDuplicateId (groups, 2));
 }

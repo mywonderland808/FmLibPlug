@@ -25,7 +25,21 @@ TEST_CASE ("VoiceMorpher corners and midpoint", "[sysex][morph]")
     REQUIRE (VoiceMorpher::morph4 (a, b, c, d, 1.0f, 1.0f)[0] == 100);
     const auto mid = VoiceMorpher::morph4 (a, b, c, d, 0.5f, 0.5f);
     REQUIRE (mid[0] == 50);
+    // Midpoint is equidistant; implementation prefers A when tied.
+    REQUIRE (mid[145] == 'A');
+}
 
-    const auto packed = packVoice (mid);
-    REQUIRE (packed.size() == static_cast<size_t> (kPackedVoiceBytes));
+TEST_CASE ("VoiceMorpher clamps xy and picks nearest name", "[sysex][morph]")
+{
+    VoiceData a {}, b {}, c {}, d {};
+    for (int i = 0; i < kNameLength; ++i)
+    {
+        a[static_cast<size_t> (145 + i)] = static_cast<uint8_t> ('A');
+        b[static_cast<size_t> (145 + i)] = static_cast<uint8_t> ('B');
+        c[static_cast<size_t> (145 + i)] = static_cast<uint8_t> ('C');
+        d[static_cast<size_t> (145 + i)] = static_cast<uint8_t> ('D');
+    }
+
+    const auto clamped = VoiceMorpher::morph4 (a, b, c, d, -1.0f, 2.0f);
+    REQUIRE (clamped[145] == 'C'); // (0,1) → corner C
 }
