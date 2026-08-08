@@ -1,7 +1,7 @@
 # FmLibPlug
 cmake_minimum_required(VERSION 3.22)
 
-project(FmLibPlug VERSION 1.0.2)
+project(FmLibPlug VERSION 1.1.0)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -21,11 +21,14 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(JUCE)
 
-# AUv3 is opt-in: many macOS Command Line Tools setups never emit FmLibPlug_AUv3,
-# which left users thinking plugins "failed" when make auv3 could not find a target.
-set(FMLIBPLUG_FORMATS VST3 AU LV2 Standalone)
-if(FMLIBPLUG_BUILD_AUV3)
-  list(APPEND FMLIBPLUG_FORMATS AUv3)
+# AUv3 is opt-in: many macOS Command Line Tools setups never emit FmLibPlug_AUv3.
+# AU / AUv3 are Apple-only — do not request them on Windows/Linux.
+set(FMLIBPLUG_FORMATS VST3 LV2 Standalone)
+if(APPLE)
+  list(APPEND FMLIBPLUG_FORMATS AU)
+  if(FMLIBPLUG_BUILD_AUV3)
+    list(APPEND FMLIBPLUG_FORMATS AUv3)
+  endif()
 endif()
 
 if(DEFINED ENV{AAX_SDK_PATH} OR DEFINED AAX_SDK_PATH)

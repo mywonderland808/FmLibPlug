@@ -1,10 +1,10 @@
 # FmLibPlug — cmake/ctest shortcuts (make help)
 #
 #   make build      → artefacts under build/FmLibPlug_artefacts/$(CONFIG)/
-#   make install    → AU/VST3/CLAP/LV2 → ~/Library/Audio/Plug-Ins/... (macOS)
+#   make install    → VST3/CLAP/LV2 (+ AU on macOS) into OS default folders
 #   make plugins    → build && install
 #
-# Standalone stays in the build tree.
+# Standalone stays in the build tree. See docs/PLATFORM.md for Windows/Linux.
 
 BUILD_DIR   ?= build
 JOBS        ?= $(shell sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)
@@ -22,10 +22,38 @@ endif
 # leave Standalone/AU/… stale while only SharedCode/VST3 refreshed. Set FORCE_RELINK=0 to skip.
 FORCE_RELINK ?= 1
 
-AU_DIR   ?= $(HOME)/Library/Audio/Plug-Ins/Components
-VST3_DIR ?= $(HOME)/Library/Audio/Plug-Ins/VST3
-CLAP_DIR ?= $(HOME)/Library/Audio/Plug-Ins/CLAP
-LV2_DIR  ?= $(HOME)/Library/Audio/Plug-Ins/LV2
+SCRIPTS := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/scripts)
+UNAME_S := $(shell uname -s 2>/dev/null)
+ifeq ($(UNAME_S),Darwin)
+  FMLIB_OS := macos
+  AU_DIR   ?= $(HOME)/Library/Audio/Plug-Ins/Components
+  VST3_DIR ?= $(HOME)/Library/Audio/Plug-Ins/VST3
+  CLAP_DIR ?= $(HOME)/Library/Audio/Plug-Ins/CLAP
+  LV2_DIR  ?= $(HOME)/Library/Audio/Plug-Ins/LV2
+  INSTALL_AU ?= 1
+else ifeq ($(UNAME_S),Linux)
+  FMLIB_OS := linux
+  AU_DIR   ?=
+  VST3_DIR ?= $(HOME)/.vst3
+  CLAP_DIR ?= $(HOME)/.clap
+  LV2_DIR  ?= $(HOME)/.lv2
+  INSTALL_AU ?= 0
+else ifneq (,$(filter MINGW% MSYS% CYGWIN%,$(UNAME_S)))
+  # Git Bash / MSYS — mirror PowerShell defaults (shell handles spaces in Program Files).
+  FMLIB_OS := windows
+  AU_DIR   ?=
+  VST3_DIR ?= $(shell if [ -n "$$COMMONPROGRAMFILES" ]; then printf '%s\n' "$$COMMONPROGRAMFILES/VST3"; elif [ -n "$$PROGRAMFILES" ]; then printf '%s\n' "$$PROGRAMFILES/Common Files/VST3"; else printf '%s\n' "$$HOME/.vst3"; fi)
+  CLAP_DIR ?= $(shell if [ -n "$$COMMONPROGRAMFILES" ]; then printf '%s\n' "$$COMMONPROGRAMFILES/CLAP"; elif [ -n "$$PROGRAMFILES" ]; then printf '%s\n' "$$PROGRAMFILES/Common Files/CLAP"; else printf '%s\n' "$$HOME/.clap"; fi)
+  LV2_DIR  ?= $(shell if [ -n "$$APPDATA" ]; then printf '%s\n' "$$APPDATA/LV2"; else printf '%s\n' "$$HOME/AppData/Roaming/LV2"; fi)
+  INSTALL_AU ?= 0
+else
+  FMLIB_OS := other
+  AU_DIR   ?=
+  VST3_DIR ?= $(HOME)/.vst3
+  CLAP_DIR ?= $(HOME)/.clap
+  LV2_DIR  ?= $(HOME)/.lv2
+  INSTALL_AU ?= 0
+endif
 
 ARTEFACT_ROOT := $(BUILD_DIR)/FmLibPlug_artefacts/$(CONFIG)
 
@@ -38,36 +66,42 @@ ARTEFACT_ROOT := $(BUILD_DIR)/FmLibPlug_artefacts/$(CONFIG)
 	fixtures clean print-artefacts write-stamp
 
 help:
-	@echo "FmLibPlug make targets (BUILD_DIR=$(BUILD_DIR), CONFIG=$(CONFIG))"
+	@echo "FmLibPlug make targets (OS=$(FMLIB_OS), BUILD_DIR=$(BUILD_DIR), CONFIG=$(CONFIG))"
 	@echo ""
 	@echo "  Primary"
-	@echo "    make build               Build Standalone+VST3+AU+LV2+CLAP (+ tests)  [no install]"
-	@echo "    make install             Copy AU/VST3/CLAP/LV2 into ~/Library/Audio/Plug-Ins/...  (macOS)"
+	@echo "    make build               Build Standalone+VST3+LV2+CLAP (+ AU on macOS) [no install]"
+	@echo "    make install             Copy plugins into OS default folders (see docs/PLATFORM.md)"
 	@echo "    make plugins             make build && make install"
 	@echo ""
 	@echo "  Configure"
 	@echo "    make configure / configure-release"
 	@echo "    make standalone|vst3|au|lv2|clap"
-	@echo "    make shared              Shared code .a only (not host-loadable)"
+	@echo "    make shared              Shared code library only (not host-loadable)"
 	@echo "    make verify-plugins / print-artefacts / show-config"
 	@echo ""
 	@echo "  Tests: make check | check-smoke | check-all | check-hw | check-hw-list | fixtures"
 	@echo "  Other: make clean | rebuild"
 	@echo ""
 	@echo "Build artefacts:  $(ARTEFACT_ROOT)/"
-	@echo "Install targets (macOS):"
-	@echo "  AU    $(AU_DIR)/FmLibPlug.component"
+	@echo "Install targets ($(FMLIB_OS)):"
+	@if [ "$(INSTALL_AU)" = "1" ]; then echo "  AU    $(AU_DIR)/FmLibPlug.component"; fi
 	@echo "  VST3  $(VST3_DIR)/FmLibPlug.vst3"
 	@echo "  CLAP  $(CLAP_DIR)/FmLibPlug.clap"
 	@echo "  LV2   $(LV2_DIR)/FmLibPlug.lv2"
 	@echo "Standalone stays in the build tree (not installed)."
+	@echo "Windows without Make: scripts/install-plugins.ps1 (see docs/PLATFORM.md)."
 
 show-config:
+	@echo "FMLIB_OS=$(FMLIB_OS)"
 	@echo "BUILD_DIR=$(BUILD_DIR)"
 	@echo "BUILD_TYPE=$(BUILD_TYPE)"
 	@echo "CONFIG=$(CONFIG) (from CMakeCache or BUILD_TYPE)"
 	@echo "ARTEFACT_ROOT=$(ARTEFACT_ROOT)"
 	@echo "FORCE_RELINK=$(FORCE_RELINK)"
+	@echo "INSTALL_AU=$(INSTALL_AU)"
+	@echo "VST3_DIR=$(VST3_DIR)"
+	@echo "CLAP_DIR=$(CLAP_DIR)"
+	@echo "LV2_DIR=$(LV2_DIR)"
 	@if [ -f "$(BUILD_DIR)/CMakeCache.txt" ]; then \
 		echo "CMakeCache CMAKE_BUILD_TYPE=$$(sed -n 's/^CMAKE_BUILD_TYPE:STRING=//p' "$(BUILD_DIR)/CMakeCache.txt" | head -1)"; \
 	fi
@@ -96,23 +130,28 @@ ensure-configure:
 
 force-relink-clean:
 	@if [ "$(FORCE_RELINK)" = "1" ]; then \
-		echo "Removing format binaries to force relink against SharedCode..."; \
-		rm -f "$(ARTEFACT_ROOT)/Standalone/FmLibPlug.app/Contents/MacOS/FmLibPlug"; \
-		rm -f "$(ARTEFACT_ROOT)/VST3/FmLibPlug.vst3/Contents/MacOS/FmLibPlug"; \
-		rm -f "$(ARTEFACT_ROOT)/AU/FmLibPlug.component/Contents/MacOS/FmLibPlug"; \
-		rm -f "$(ARTEFACT_ROOT)/LV2/FmLibPlug.lv2/libFmLibPlug.so"; \
-		rm -f "$(ARTEFACT_ROOT)/CLAP/FmLibPlug.clap/Contents/MacOS/FmLibPlug"; \
+		echo "Removing format products to force relink against SharedCode..."; \
+		rm -rf "$(ARTEFACT_ROOT)/Standalone/FmLibPlug.app" \
+			"$(ARTEFACT_ROOT)/Standalone/FmLibPlug" \
+			"$(ARTEFACT_ROOT)/Standalone/FmLibPlug.exe" \
+			"$(ARTEFACT_ROOT)/VST3/FmLibPlug.vst3" \
+			"$(ARTEFACT_ROOT)/AU/FmLibPlug.component" \
+			"$(ARTEFACT_ROOT)/LV2/FmLibPlug.lv2" \
+			"$(ARTEFACT_ROOT)/CLAP/FmLibPlug.clap"; \
 	fi
 
 write-stamp:
 	@mkdir -p "$(ARTEFACT_ROOT)"; \
+	. "$(SCRIPTS)/fmlib-paths.sh"; \
 	stamp="$(ARTEFACT_ROOT)/BUILD_STAMP.txt"; \
+	shared=$$(fmlib_shared_lib "$(ARTEFACT_ROOT)" || true); \
 	{ \
-	  echo "version=1.0.1"; \
+	  echo "version=1.1.0"; \
 	  echo "config=$(CONFIG)"; \
+	  echo "os=$(FMLIB_OS)"; \
 	  echo "built_utc=$$(date -u +%Y-%m-%dT%H:%M:%SZ)"; \
 	  echo "git=$$(git -C . rev-parse --short HEAD 2>/dev/null || echo unknown)"; \
-	  echo "shared_mtime=$$(stat -f '%Sm' -t '%Y-%m-%d %H:%M:%S' "$(ARTEFACT_ROOT)/libFmLibPlug_SharedCode.a" 2>/dev/null || echo none)"; \
+	  echo "shared_mtime=$$(fmlib_mtime_human "$${shared:-}")"; \
 	} > "$$stamp"; \
 	echo "Wrote $$stamp"; \
 	cat "$$stamp"
@@ -161,37 +200,40 @@ shared: ensure-configure
 standalone: ensure-configure force-relink-clean
 	$(CMAKE) --build $(BUILD_DIR) --target FmLibPlug -j$(JOBS)
 	$(CMAKE) --build $(BUILD_DIR) --target FmLibPlug_Standalone -j$(JOBS)
-	@$(MAKE) verify-one BIN="$(ARTEFACT_ROOT)/Standalone/FmLibPlug.app/Contents/MacOS/FmLibPlug"
+	@$(MAKE) verify-one KIND=Standalone
 
 vst3: ensure-configure force-relink-clean
 	$(CMAKE) --build $(BUILD_DIR) --target FmLibPlug -j$(JOBS)
 	$(CMAKE) --build $(BUILD_DIR) --target FmLibPlug_VST3 -j$(JOBS)
-	@$(MAKE) verify-one BIN="$(ARTEFACT_ROOT)/VST3/FmLibPlug.vst3/Contents/MacOS/FmLibPlug"
+	@$(MAKE) verify-one KIND=VST3
 
 au: ensure-configure force-relink-clean
+	@if [ "$(INSTALL_AU)" != "1" ]; then echo "AU is Apple-only."; exit 1; fi
 	$(CMAKE) --build $(BUILD_DIR) --target FmLibPlug -j$(JOBS)
 	$(CMAKE) --build $(BUILD_DIR) --target FmLibPlug_AU -j$(JOBS)
-	@$(MAKE) verify-one BIN="$(ARTEFACT_ROOT)/AU/FmLibPlug.component/Contents/MacOS/FmLibPlug"
+	@$(MAKE) verify-one KIND=AU
 
 auv3:
 	@echo "AUv3 is opt-in and unavailable on many CLI toolchains."
-	@echo "Use: make au"
+	@echo "Use: make au  (macOS only)"
 	@exit 1
 
 lv2: ensure-configure force-relink-clean
 	$(CMAKE) --build $(BUILD_DIR) --target FmLibPlug -j$(JOBS)
 	$(CMAKE) --build $(BUILD_DIR) --target FmLibPlug_LV2 -j$(JOBS)
-	@$(MAKE) verify-one BIN="$(ARTEFACT_ROOT)/LV2/FmLibPlug.lv2/libFmLibPlug.so"
+	@$(MAKE) verify-one KIND=LV2
 
 clap: ensure-configure force-relink-clean
 	$(CMAKE) --build $(BUILD_DIR) --target FmLibPlug -j$(JOBS)
 	$(CMAKE) --build $(BUILD_DIR) --target FmLibPlug_CLAP -j$(JOBS)
-	@$(MAKE) verify-one BIN="$(ARTEFACT_ROOT)/CLAP/FmLibPlug.clap/Contents/MacOS/FmLibPlug"
+	@$(MAKE) verify-one KIND=CLAP
 
 touch-artefact-bundles:
 	@root="$(ARTEFACT_ROOT)"; \
 	for p in \
 		"$$root/Standalone/FmLibPlug.app" \
+		"$$root/Standalone/FmLibPlug" \
+		"$$root/Standalone/FmLibPlug.exe" \
 		"$$root/VST3/FmLibPlug.vst3" \
 		"$$root/AU/FmLibPlug.component" \
 		"$$root/LV2/FmLibPlug.lv2" \
@@ -200,48 +242,65 @@ touch-artefact-bundles:
 	done
 
 verify-one:
-	@shared="$(ARTEFACT_ROOT)/libFmLibPlug_SharedCode.a"; \
-	bin="$(BIN)"; \
-	if [ ! -e "$$bin" ] || [ ! -s "$$bin" ]; then echo "MISSING/EMPTY: $$bin"; exit 1; fi; \
-	if [ -e "$$shared" ]; then \
-	  st=$$(stat -f '%m' "$$shared"); bt=$$(stat -f '%m' "$$bin"); \
+	@. "$(SCRIPTS)/fmlib-paths.sh"; \
+	root="$(ARTEFACT_ROOT)"; \
+	case "$(KIND)" in \
+		Standalone) \
+			prod="$$root/Standalone/FmLibPlug.app"; \
+			[ -e "$$prod" ] || prod="$$root/Standalone"; \
+			;; \
+		VST3) prod="$$root/VST3/FmLibPlug.vst3" ;; \
+		AU) prod="$$root/AU/FmLibPlug.component" ;; \
+		LV2) prod="$$root/LV2/FmLibPlug.lv2" ;; \
+		CLAP) prod="$$root/CLAP/FmLibPlug.clap" ;; \
+		*) echo "verify-one: set KIND=Standalone|VST3|AU|LV2|CLAP"; exit 1 ;; \
+	esac; \
+	bin=$$(fmlib_find_binary "$$prod") || { echo "MISSING/EMPTY under $$prod"; exit 1; }; \
+	shared=$$(fmlib_shared_lib "$$root") || true; \
+	if [ -n "$$shared" ] && [ -e "$$shared" ]; then \
+	  st=$$(fmlib_mtime "$$shared"); bt=$$(fmlib_mtime "$$bin"); \
 	  if [ "$$bt" -lt "$$st" ]; then \
-	    echo "STALE: $$bin is older than SharedCode.a — rerun make build"; \
+	    echo "STALE: $$bin is older than SharedCode — rerun make build"; \
 	    exit 1; \
 	  fi; \
 	fi; \
 	echo "OK: $$bin"
 
 verify-plugins:
-	@root="$(ARTEFACT_ROOT)"; \
-	shared="$$root/libFmLibPlug_SharedCode.a"; \
+	@. "$(SCRIPTS)/fmlib-paths.sh"; \
+	root="$(ARTEFACT_ROOT)"; \
 	err=0; \
-	echo "Verifying plugins under $$root"; \
+	echo "Verifying plugins under $$root (os=$(FMLIB_OS))"; \
 	if [ ! -d "$$root" ]; then \
 		echo "ERROR: artefact root missing: $$root"; \
 		echo "Hint: BUILD_TYPE/CONFIG mismatch? e.g. make build BUILD_TYPE=Release"; \
 		exit 1; \
 	fi; \
-	if [ ! -e "$$shared" ]; then echo "MISSING SharedCode: $$shared"; exit 1; fi; \
-	st=$$(stat -f '%m' "$$shared"); \
-	echo "SharedCode.a mtime: $$(stat -f '%Sm' -t '%Y-%m-%d %H:%M:%S' "$$shared")"; \
-	check() { \
-		if [ ! -e "$$1" ]; then echo "MISSING: $$1"; err=1; \
-		elif [ ! -s "$$1" ]; then echo "EMPTY:   $$1"; err=1; \
+	shared=$$(fmlib_shared_lib "$$root") || { echo "MISSING SharedCode under $$root"; exit 1; }; \
+	st=$$(fmlib_mtime "$$shared"); \
+	echo "SharedCode mtime: $$(fmlib_mtime_human "$$shared")"; \
+	check_kind() { \
+		label="$$1"; prod="$$2"; required="$$3"; \
+		bin=$$(fmlib_find_binary "$$prod" 2>/dev/null || true); \
+		if [ -z "$$bin" ]; then \
+			if [ "$$required" = "1" ]; then echo "MISSING: $$label ($$prod)"; err=1; \
+			else echo "SKIP:    $$label (not built)"; fi; \
+			return; \
+		fi; \
+		bt=$$(fmlib_mtime "$$bin"); \
+		if [ "$$bt" -lt "$$st" ]; then \
+			echo "STALE:   $$bin (older than SharedCode)"; err=1; \
 		else \
-		  bt=$$(stat -f '%m' "$$1"); \
-		  if [ "$$bt" -lt "$$st" ]; then \
-		    echo "STALE:   $$1 (older than SharedCode.a)"; err=1; \
-		  else \
-		    echo "OK:      $$1 ($$(stat -f '%Sm %z bytes' -t '%H:%M:%S' "$$1"))"; \
-		  fi; \
+			echo "OK:      $$bin"; \
 		fi; \
 	}; \
-	check "$$root/Standalone/FmLibPlug.app/Contents/MacOS/FmLibPlug"; \
-	check "$$root/VST3/FmLibPlug.vst3/Contents/MacOS/FmLibPlug"; \
-	check "$$root/AU/FmLibPlug.component/Contents/MacOS/FmLibPlug"; \
-	check "$$root/LV2/FmLibPlug.lv2/libFmLibPlug.so"; \
-	check "$$root/CLAP/FmLibPlug.clap/Contents/MacOS/FmLibPlug"; \
+	sa="$$root/Standalone/FmLibPlug.app"; \
+	[ -e "$$sa" ] || sa="$$root/Standalone"; \
+	check_kind Standalone "$$sa" 1; \
+	check_kind VST3 "$$root/VST3/FmLibPlug.vst3" 1; \
+	check_kind AU "$$root/AU/FmLibPlug.component" "$(INSTALL_AU)"; \
+	check_kind LV2 "$$root/LV2/FmLibPlug.lv2" 1; \
+	check_kind CLAP "$$root/CLAP/FmLibPlug.clap" 1; \
 	exit $$err
 
 print-artefacts:
@@ -249,89 +308,18 @@ print-artefacts:
 	if [ -f "$(ARTEFACT_ROOT)/BUILD_STAMP.txt" ]; then echo "---- BUILD_STAMP ----"; cat "$(ARTEFACT_ROOT)/BUILD_STAMP.txt"; echo "--------------------"; fi; \
 	du -sh \
 		"$(ARTEFACT_ROOT)/Standalone/FmLibPlug.app" \
+		"$(ARTEFACT_ROOT)/Standalone/FmLibPlug" \
+		"$(ARTEFACT_ROOT)/Standalone/FmLibPlug.exe" \
 		"$(ARTEFACT_ROOT)/VST3/FmLibPlug.vst3" \
 		"$(ARTEFACT_ROOT)/AU/FmLibPlug.component" \
 		"$(ARTEFACT_ROOT)/LV2/FmLibPlug.lv2" \
 		"$(ARTEFACT_ROOT)/CLAP/FmLibPlug.clap" \
 		2>/dev/null || true
 
-# Install host formats only (not Standalone).
+# Install host formats only (not Standalone). Portable across macOS/Linux (+ Git Bash).
 install: verify-plugins
-	@echo ""
-	@echo "==== INSTALL ===="
-	@echo "Source:  $(ARTEFACT_ROOT)/"
-	@echo "Destinations:"
-	@echo "  AU    -> $(AU_DIR)/FmLibPlug.component"
-	@echo "  VST3  -> $(VST3_DIR)/FmLibPlug.vst3"
-	@echo "  CLAP  -> $(CLAP_DIR)/FmLibPlug.clap"
-	@echo "  LV2   -> $(LV2_DIR)/FmLibPlug.lv2"
-	@echo "==============="
-	@mkdir -p "$(AU_DIR)" "$(VST3_DIR)" "$(CLAP_DIR)" "$(LV2_DIR)"
-	@rm -rf "$(AU_DIR)/FmLibPlug.component" \
-		"$(VST3_DIR)/FmLibPlug.vst3" \
-		"$(CLAP_DIR)/FmLibPlug.clap" \
-		"$(LV2_DIR)/FmLibPlug.lv2"
-	@if command -v ditto >/dev/null 2>&1; then \
-		ditto "$(ARTEFACT_ROOT)/AU/FmLibPlug.component" "$(AU_DIR)/FmLibPlug.component"; \
-		ditto "$(ARTEFACT_ROOT)/VST3/FmLibPlug.vst3" "$(VST3_DIR)/FmLibPlug.vst3"; \
-		ditto "$(ARTEFACT_ROOT)/CLAP/FmLibPlug.clap" "$(CLAP_DIR)/FmLibPlug.clap"; \
-		ditto "$(ARTEFACT_ROOT)/LV2/FmLibPlug.lv2" "$(LV2_DIR)/FmLibPlug.lv2"; \
-	else \
-		cp -R "$(ARTEFACT_ROOT)/AU/FmLibPlug.component" "$(AU_DIR)/"; \
-		cp -R "$(ARTEFACT_ROOT)/VST3/FmLibPlug.vst3" "$(VST3_DIR)/"; \
-		cp -R "$(ARTEFACT_ROOT)/CLAP/FmLibPlug.clap" "$(CLAP_DIR)/"; \
-		cp -R "$(ARTEFACT_ROOT)/LV2/FmLibPlug.lv2" "$(LV2_DIR)/"; \
-	fi
-	@cp "$(ARTEFACT_ROOT)/BUILD_STAMP.txt" "$(VST3_DIR)/FmLibPlug.vst3/BUILD_STAMP.txt" 2>/dev/null || true
-	@cp "$(ARTEFACT_ROOT)/BUILD_STAMP.txt" "$(AU_DIR)/FmLibPlug.component/BUILD_STAMP.txt" 2>/dev/null || true
-	@echo "---- checksum verification ----"; \
-	fail=0; \
-	verify_copy() { \
-		src="$$1"; dst="$$2"; label="$$3"; \
-		if [ ! -e "$$src" ] || [ ! -e "$$dst" ]; then echo "MISSING $$label"; fail=1; return; fi; \
-		ss=$$(shasum -a 256 "$$src" | awk '{print $$1}'); \
-		ds=$$(shasum -a 256 "$$dst" | awk '{print $$1}'); \
-		dm=$$(stat -f '%Sm' -t '%Y-%m-%d %H:%M:%S' "$$dst"); \
-		if [ "$$ss" = "$$ds" ]; then \
-			echo "OK  $$label  $$dm"; \
-			echo "    $$dst"; \
-		else \
-			echo "MISMATCH $$label"; fail=1; \
-		fi; \
-	}; \
-	verify_copy "$(ARTEFACT_ROOT)/AU/FmLibPlug.component/Contents/MacOS/FmLibPlug" \
-		"$(AU_DIR)/FmLibPlug.component/Contents/MacOS/FmLibPlug" "AU"; \
-	verify_copy "$(ARTEFACT_ROOT)/VST3/FmLibPlug.vst3/Contents/MacOS/FmLibPlug" \
-		"$(VST3_DIR)/FmLibPlug.vst3/Contents/MacOS/FmLibPlug" "VST3"; \
-	verify_copy "$(ARTEFACT_ROOT)/CLAP/FmLibPlug.clap/Contents/MacOS/FmLibPlug" \
-		"$(CLAP_DIR)/FmLibPlug.clap/Contents/MacOS/FmLibPlug" "CLAP"; \
-	verify_copy "$(ARTEFACT_ROOT)/LV2/FmLibPlug.lv2/libFmLibPlug.so" \
-		"$(LV2_DIR)/FmLibPlug.lv2/libFmLibPlug.so" "LV2"; \
-	if [ "$$fail" != "0" ]; then exit 1; fi
-	@echo "Install complete. Quit the DAW fully (not just rescan) — hosts keep loaded plugins in memory."
-	@echo "Confirm the UI version label matches the Build id printed by make build."
-	@# macOS AU registration can cache the old component; nudge it.
-	@rm -f "$(HOME)/Library/Caches/com.apple.audiounits.cache" 2>/dev/null || true
-	@rm -rf "$(HOME)/Library/Caches/AudioUnitCache" 2>/dev/null || true
-	@killall -9 AudioComponentRegistrar 2>/dev/null || true
-	@# Ad-hoc sign installed bundles so Gatekeeper/hosts accept the replacement.
-	@codesign --force --deep -s - "$(AU_DIR)/FmLibPlug.component" 2>/dev/null || true
-	@codesign --force --deep -s - "$(VST3_DIR)/FmLibPlug.vst3" 2>/dev/null || true
-	@codesign --force --deep -s - "$(CLAP_DIR)/FmLibPlug.clap" 2>/dev/null || true
-	@# Bump CFBundleVersion so hosts notice a change even if they key off Info.plist.
-	@buildver=$$(date -u +%Y%m%d%H%M%S); \
-	for plist in \
-		"$(AU_DIR)/FmLibPlug.component/Contents/Info.plist" \
-		"$(VST3_DIR)/FmLibPlug.vst3/Contents/Info.plist" \
-		"$(CLAP_DIR)/FmLibPlug.clap/Contents/Info.plist"; do \
-		if [ -f "$$plist" ]; then \
-			/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $$buildver" "$$plist" 2>/dev/null \
-				|| /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string $$buildver" "$$plist" 2>/dev/null \
-				|| true; \
-		fi; \
-	done
-	@echo "Standalone (not installed): $(ARTEFACT_ROOT)/Standalone/FmLibPlug.app"
-	@echo "  open \"$(ARTEFACT_ROOT)/Standalone/FmLibPlug.app\""
+	@AU_DIR="$(AU_DIR)" VST3_DIR="$(VST3_DIR)" CLAP_DIR="$(CLAP_DIR)" LV2_DIR="$(LV2_DIR)" INSTALL_AU="$(INSTALL_AU)" \
+		"$(SCRIPTS)/install-plugins.sh" "$(ARTEFACT_ROOT)"
 
 check: ensure-configure
 	$(CMAKE) --build $(BUILD_DIR) --target check -j$(JOBS)

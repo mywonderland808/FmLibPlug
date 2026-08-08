@@ -1,8 +1,8 @@
 # FmLibPlug
 
-**Version 1.0.1** — AGPL-3.0 JUCE 8 MIDI librarian for **Yamaha DX7 mkI / TX7** voice SysEx.
+**Version 1.1.0** — AGPL-3.0 JUCE 8 MIDI librarian for **Yamaha DX7 mkI / TX7** voice SysEx.
 
-Product name: **FmLibPlug**. Release notes: [CHANGELOG.md](CHANGELOG.md). Version source: `project(FmLibPlug VERSION ...)` in `CMakeLists.txt`.
+Product name: **FmLibPlug**. Release notes: [CHANGELOG.md](CHANGELOG.md). Version source: `project(FmLibPlug VERSION ...)` in `CMakeLists.txt`. Cross-platform notes: [docs/PLATFORM.md](docs/PLATFORM.md).
 
 ## Features
 
@@ -24,12 +24,12 @@ Product name: **FmLibPlug**. Release notes: [CHANGELOG.md](CHANGELOG.md). Versio
 
 ## Build
 
-### macOS
+### macOS / Linux (Make)
 
 ```bash
 make configure-release   # or: make configure  (Debug)
-make build               # Standalone + VST3 + AU + LV2 + CLAP (+ tests)
-make install             # AU/VST3/CLAP/LV2 → ~/Library/Audio/Plug-Ins/...
+make build               # Standalone + VST3 + LV2 + CLAP (+ AU on macOS) + tests
+make install             # OS-default plugin folders (see below)
 make plugins             # build && install
 ```
 
@@ -37,44 +37,38 @@ Artefacts:
 
 ```text
 build/FmLibPlug_artefacts/Debug/   # or Release/
-  Standalone/FmLibPlug.app
+  Standalone/...
   VST3/FmLibPlug.vst3
-  AU/FmLibPlug.component
+  AU/FmLibPlug.component           # macOS only
   LV2/FmLibPlug.lv2
   CLAP/FmLibPlug.clap
 ```
 
-Install destinations:
+Default install destinations (`make install`):
 
-```text
-~/Library/Audio/Plug-Ins/Components/FmLibPlug.component
-~/Library/Audio/Plug-Ins/VST3/FmLibPlug.vst3
-~/Library/Audio/Plug-Ins/CLAP/FmLibPlug.clap
-~/Library/Audio/Plug-Ins/LV2/FmLibPlug.lv2
-```
+| OS | VST3 | CLAP | LV2 | AU |
+|----|------|------|-----|----|
+| macOS | `~/Library/Audio/Plug-Ins/VST3` | `…/CLAP` | `…/LV2` | `…/Components` |
+| Linux | `~/.vst3` | `~/.clap` | `~/.lv2` | — |
 
-Standalone stays in the build tree. Quit the DAW fully after install; the UI shows version + build-id.
+Override with `VST3_DIR` / `CLAP_DIR` / `LV2_DIR` / `AU_DIR`. Standalone stays in the build tree. Quit the DAW fully after install; the UI shows version + build-id.
 
-- `make shared` — shared code `.a` only (not host-loadable)
-- AUv3: `-DFMLIBPLUG_BUILD_AUV3=ON` (often unavailable on CLI toolchains)
+- `make shared` — shared code library only (not host-loadable)
+- AUv3: `-DFMLIBPLUG_BUILD_AUV3=ON` (macOS; often unavailable on CLI toolchains)
 - Optional: `-DFMLIBPLUG_COPY_PLUGIN_AFTER_BUILD=ON`
 
-### Windows / Linux
+### Windows
 
-`make install` is macOS-only. Build with CMake; copy VST3/CLAP/LV2 into host folders. AU is Apple-only. See [docs/TODO-next.md](docs/TODO-next.md).
-
-```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+```powershell
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release `
   -DFMLIBPLUG_BUILD_TESTS=ON -DFMLIBPLUG_BUILD_CLAP=ON
 cmake --build build --config Release -j
-# artefacts: build/FmLibPlug_artefacts/<Config>/
+powershell -ExecutionPolicy Bypass -File scripts\install-plugins.ps1 -Config Release
 ```
 
-| Format | Windows | Linux |
-|--------|---------|-------|
-| VST3 | `%CommonProgramFiles%/VST3` | `~/.vst3` |
-| CLAP | `%CommonProgramFiles%/CLAP` | `~/.clap` |
-| LV2 | (host-specific) | `~/.lv2` |
+Defaults: `%CommonProgramFiles%\VST3`, `%CommonProgramFiles%\CLAP`, `%APPDATA%\LV2`. AU is Apple-only.
+
+**Status:** Windows and Linux paths are supported in scripts/docs but not yet verified on those machines — see the checklist in [docs/PLATFORM.md](docs/PLATFORM.md).
 
 ## Tests
 
@@ -90,11 +84,12 @@ Or: `cmake --build build --target check` (also `check-smoke`, `check-all`).
 
 ### Hardware MIDI (TX7 / DX7)
 
-`make check-hw-list` — list MIDI ports. `make check-hw` — build and run `FmLibPlugHwMidiTest`. `ctest -L hw` is disabled by default.
+Works on macOS, Windows, and Linux via the same CMake targets (`check-hw` / `check-hw-list`).
 
 ```bash
+make check-hw-list   # list MIDI ports
 cp Tests/hw-midi.local.json.example Tests/hw-midi.local.json
-# set midiIn / midiOut from check-hw-list; "enabled": true
+# set midiIn / midiOut from the list; "enabled": true
 make check-hw
 ```
 

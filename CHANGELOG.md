@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-08-08
+
+### Added
+- Portable `make install` with OS-default VST3/CLAP/LV2 paths (AU on macOS only)
+- `scripts/install-plugins.sh` (macOS/Linux/Git Bash) and `scripts/install-plugins.ps1` (Windows)
+- [docs/PLATFORM.md](docs/PLATFORM.md) — Windows/Linux build, install, and `check-hw` checklist
+
+### Changed
+- CMake requests AU/AUv3 only on Apple toolchains
+- Makefile verify/force-relink find plugin binaries by layout (macOS/Linux/Windows)
+
+### Notes
+- Windows and Linux install/`check-hw` paths are implemented but **not verified on those OSes yet**
+  (primary build host is macOS). Use the PLATFORM.md checklist on other devices.
+
 ## [1.0.2] - 2026-08-08
 
 ### Fixed

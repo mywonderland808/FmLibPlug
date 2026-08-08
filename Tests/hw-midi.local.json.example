@@ -1,7 +1,7 @@
 {
   "enabled": true,
-  "midiIn": "Exact CoreMIDI input name from --list-devices",
-  "midiOut": "Exact CoreMIDI output name from --list-devices",
+  "midiIn": "Exact MIDI input name from check-hw-list / --list-devices",
+  "midiOut": "Exact MIDI output name from check-hw-list / --list-devices",
   "channel": 1,
   "pacingMs": 20,
   "allowBankWrite": false
