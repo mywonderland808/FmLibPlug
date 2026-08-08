@@ -12,13 +12,6 @@
 namespace fmlib
 {
 
-struct BrowserStats
-{
-    int totalInScope = 0;   // after Bank/Single file filter
-    int shown = 0;          // voice rows after search/filters
-    int duplicates = 0;     // voices in scope that share a contentId
-};
-
 class PatchBrowser : public juce::Component,
                      private juce::TableListBoxModel,
                      private juce::TextEditor::Listener,
@@ -91,7 +84,7 @@ private:
     void applyColumnSort (std::vector<PatchEntry>& voices, bool keepBankGroups) const;
     int compareEntries (const PatchEntry& a, const PatchEntry& b) const;
     static juce::String folderColumnText (const PatchEntry& e);
-    static bool isBankFileVoice (const PatchEntry& e) { return e.bankSlot > 0; }
+    static bool isBankFileVoice (const PatchEntry& e) { return BrowserList::isBankFileVoice (e); }
 
     juce::TextEditor search;
     juce::ToggleButton favOnly { "Favorites" };

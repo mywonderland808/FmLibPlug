@@ -6,7 +6,7 @@
 #include <cmath>
 #include <filesystem>
 #include <iterator>
-#include <unordered_map>
+#include <unordered_set>
 
 namespace fmlib
 {
@@ -503,49 +503,24 @@ void PatchBrowser::rebuildFiltered()
     FavoritesStore empty;
     const auto* store = favStore != nullptr ? favStore : &empty;
 
-    std::vector<PatchEntry> scoped;
-    scoped.reserve (all.size());
-    for (const auto& e : all)
-    {
-        if (bankFileView)
-        {
-            if (isBankFileVoice (e))
-                scoped.push_back (e);
-        }
-        else
-        {
-            if (! isBankFileVoice (e))
-                scoped.push_back (e);
-        }
-    }
-
-    std::unordered_map<uint64_t, int> counts;
-    for (const auto& e : scoped)
-        ++counts[e.contentId];
-    int dupeVoices = 0;
-    for (const auto& e : scoped)
-        if (counts[e.contentId] >= 2)
-            ++dupeVoices;
-
     auto q = LibraryFilter::parse (search.getText().toStdString(), favOnly.getToggleState());
     const auto recentIds = recentStore != nullptr ? recentStore->contentIds() : std::unordered_set<uint64_t> {};
     const auto* recentPtr = (q.recentOnly && recentStore != nullptr) ? &recentIds : nullptr;
-    auto voices = LibraryFilter::apply (std::move (scoped), q, *store, tagStore, recentPtr);
+
+    auto filtered = BrowserList::filterForBrowser (all, bankFileView, q, *store, tagStore, recentPtr);
+    auto voices = std::move (filtered.voices);
 
     const bool grouping = bankFileView && groupByBank && q.orGroups.empty() && ! q.duplicatesOnly;
     applyColumnSort (voices, grouping);
+    // Dedupe after sort so the kept copy matches the active column order.
     if (hideDuplicates && ! q.duplicatesOnly)
         voices = LibraryFilter::keepFirstByContentId (std::move (voices));
 
     rows = BrowserList::buildRows (std::move (voices), grouping);
     lastSentRow = -1;
 
-    int shown = 0;
-    for (const auto& r : rows)
-        if (r.kind == BrowserRowKind::voice)
-            ++shown;
-
-    lastStats = { static_cast<int> (scoped.size()), shown, dupeVoices };
+    lastStats = filtered.stats;
+    lastStats.shown = BrowserList::countVoiceRows (rows);
     if (onStatsChanged)
         onStatsChanged (lastStats);
 

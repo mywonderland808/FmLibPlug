@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-08-08
+
+### Fixed
+- Status bar “total” preset count always showed 0 after move-based filter rebuild (size read after `std::move`)
+- Hide-duplicates again runs after column sort so the kept voice matches the active sort order
+
+### Added
+- Catch2 coverage for browser scope/dupe/shown counters (`BrowserList::filterForBrowser`)
+
 ## [1.0.1] - 2026-08-08
 
 ### Changed

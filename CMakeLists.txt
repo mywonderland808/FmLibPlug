@@ -1,7 +1,7 @@
 # FmLibPlug
 cmake_minimum_required(VERSION 3.22)
 
-project(FmLibPlug VERSION 1.0.1)
+project(FmLibPlug VERSION 1.0.2)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -200,6 +200,7 @@ if(FMLIBPLUG_BUILD_TESTS)
     Tests/unit/FavoritesStoreTests.cpp
     Tests/unit/AppPreferencesTests.cpp
     Tests/unit/BrowserListTests.cpp
+    Tests/unit/BrowserStatsTests.cpp
     Tests/unit/TagStoreTests.cpp
     Tests/unit/FormatDetectTests.cpp
     Tests/unit/AutoTagDupeTests.cpp

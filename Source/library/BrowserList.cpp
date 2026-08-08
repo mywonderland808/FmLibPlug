@@ -1,5 +1,6 @@
 #include "library/BrowserList.h"
 #include <algorithm>
+#include <unordered_map>
 
 namespace fmlib
 {
@@ -64,6 +65,57 @@ std::vector<BrowserRow> BrowserList::buildRows (std::vector<PatchEntry> voices, 
         i = j;
     }
     return rows;
+}
+
+BrowserFilterResult BrowserList::filterForBrowser (const std::vector<PatchEntry>& all,
+                                                   bool bankFileView,
+                                                   const LibraryFilterQuery& query,
+                                                   const FavoritesStore& favorites,
+                                                   const TagStore* tags,
+                                                   const std::unordered_set<uint64_t>* recentIds)
+{
+    std::vector<PatchEntry> scoped;
+    scoped.reserve (all.size());
+    for (const auto& e : all)
+    {
+        if (bankFileView)
+        {
+            if (isBankFileVoice (e))
+                scoped.push_back (e);
+        }
+        else if (! isBankFileVoice (e))
+        {
+            scoped.push_back (e);
+        }
+    }
+
+    std::unordered_map<uint64_t, int> counts;
+    counts.reserve (scoped.size());
+    for (const auto& e : scoped)
+        ++counts[e.contentId];
+
+    int dupeVoices = 0;
+    for (const auto& e : scoped)
+        if (counts[e.contentId] >= 2)
+            ++dupeVoices;
+
+    BrowserFilterResult out;
+    out.stats.totalInScope = static_cast<int> (scoped.size());
+    out.stats.duplicates = dupeVoices;
+
+    auto voices = LibraryFilter::apply (std::move (scoped), query, favorites, tags, recentIds);
+    out.stats.shown = static_cast<int> (voices.size());
+    out.voices = std::move (voices);
+    return out;
+}
+
+int BrowserList::countVoiceRows (const std::vector<BrowserRow>& rows)
+{
+    int n = 0;
+    for (const auto& r : rows)
+        if (r.kind == BrowserRowKind::voice)
+            ++n;
+    return n;
 }
 
 namespace
