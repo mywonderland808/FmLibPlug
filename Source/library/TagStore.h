@@ -19,6 +19,8 @@ public:
     void clearTags (uint64_t contentId);
     std::vector<std::string> getTags (uint64_t contentId) const;
     bool hasTag (uint64_t contentId, const std::string& tag) const;
+    /** Sorted unique tag names used anywhere in the store. */
+    std::vector<std::string> allUniqueTags() const;
 
     void loadFromXml (const juce::XmlElement& root);
     void saveToXml (juce::XmlElement& root) const;

@@ -43,12 +43,17 @@ TEST_CASE ("LibraryFilter richer tokens", "[library][filter]")
         const auto q = LibraryFilter::parse ("dupe: recent: piano", false);
         REQUIRE (q.duplicatesOnly);
         REQUIRE (q.recentOnly);
-        REQUIRE_FALSE (q.orGroups.empty());
-        REQUIRE (q.orGroups[0].atoms[0].value == "piano");
+        REQUIRE (q.orGroups.size() == 1);
+        REQUIRE (q.orGroups[0].atoms.size() == 3);
+        REQUIRE (q.orGroups[0].atoms[0].kind == LibraryFilterAtom::Kind::duplicates);
+        REQUIRE (q.orGroups[0].atoms[1].kind == LibraryFilterAtom::Kind::recent);
+        REQUIRE (q.orGroups[0].atoms[2].kind == LibraryFilterAtom::Kind::text);
+        REQUIRE (q.orGroups[0].atoms[2].value == "piano");
     }
     {
         const auto q = LibraryFilter::parse (":dup bass", false);
         REQUIRE (q.duplicatesOnly);
-        REQUIRE (q.orGroups[0].atoms[0].value == "bass");
+        REQUIRE (q.orGroups[0].atoms[0].kind == LibraryFilterAtom::Kind::duplicates);
+        REQUIRE (q.orGroups[0].atoms[1].value == "bass");
     }
 }

@@ -1,6 +1,7 @@
 #include "library/TagStore.h"
 #include "util/StringUtils.h"
 #include <algorithm>
+#include <unordered_set>
 
 namespace fmlib
 {
@@ -62,6 +63,18 @@ bool TagStore::hasTag (uint64_t contentId, const std::string& tag) const
     if (it == tagsById.end())
         return false;
     return std::find (it->second.begin(), it->second.end(), t) != it->second.end();
+}
+
+std::vector<std::string> TagStore::allUniqueTags() const
+{
+    std::unordered_set<std::string> seen;
+    std::vector<std::string> out;
+    for (const auto& entry : tagsById)
+        for (const auto& t : entry.second)
+            if (seen.insert (t).second)
+                out.push_back (t);
+    std::sort (out.begin(), out.end());
+    return out;
 }
 
 void TagStore::loadFromXml (const juce::XmlElement& root)

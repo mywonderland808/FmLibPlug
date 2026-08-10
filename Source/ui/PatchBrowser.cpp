@@ -11,14 +11,61 @@
 namespace fmlib
 {
 
+namespace
+{
+struct TagChip
+{
+    std::string name;
+    juce::Rectangle<float> bounds;
+};
+
+std::vector<TagChip> layoutTagChips (const std::vector<std::string>& tags,
+                                     const juce::Font& font,
+                                     float width,
+                                     float height)
+{
+    std::vector<TagChip> chips;
+    constexpr float padX = 4.0f;
+    constexpr float gap = 4.0f;
+    constexpr float chipH = 18.0f;
+    float x = padX;
+    const float y = juce::jmax (0.0f, (height - chipH) * 0.5f);
+    for (const auto& t : tags)
+    {
+        if (t.empty())
+            continue;
+        const auto label = juce::String::fromUTF8 (t.c_str());
+        const float tw = juce::GlyphArrangement::getStringWidth (font, label) + 10.0f;
+        if (x > padX && x + tw > width - padX)
+            break;
+        chips.push_back ({ t, { x, y, tw, chipH } });
+        x += tw + gap;
+    }
+    return chips;
+}
+} // namespace
+
 PatchBrowser::PatchBrowser()
 {
-    search.setTextToShowWhenEmpty ("Search... tag:bass AND dark OR dupe:", juce::Colours::grey);
+    search.setTextToShowWhenEmpty ("Search... (click for filters)", juce::Colours::grey);
+    search.setTooltip ("Type to filter. Left-click inserts filter tokens; right-click for cut/copy/paste.");
+    search.onShowFilterMenu = [this] { showSearchFilterMenu(); };
     addAndMakeVisible (search);
     search.addListener (this);
 
+    clearSearchBtn.setTooltip ("Clear the search field (Favorites toggle is unchanged)");
+    clearSearchBtn.setButtonText ("Clear search");
+    clearSearchBtn.onClick = [this] { clearSearch(); };
+    addAndMakeVisible (clearSearchBtn);
+
     favOnly.setClickingTogglesState (true);
-    favOnly.onClick = [this] { rebuildFiltered(); };
+    favOnly.setTooltip ("Show favorites only");
+    favOnly.onClick = [this]
+    {
+        if (onFavoritesOnlyChanged)
+            onFavoritesOnlyChanged (favOnly.getToggleState());
+        rebuildFiltered();
+    };
     addAndMakeVisible (favOnly);
 
     groupToggle.setClickingTogglesState (true);
@@ -40,6 +87,29 @@ PatchBrowser::PatchBrowser()
     nextBank.onClick = [this] { jumpNextBank(); };
     addAndMakeVisible (prevBank);
     addAndMakeVisible (nextBank);
+
+    tagFilterToggle.setClickingTogglesState (true);
+    tagFilterToggle.setTooltip ("Show or hide the multi-line tag filter");
+    tagFilterToggle.onClick = [this]
+    {
+        tagFilterExpanded = tagFilterToggle.getToggleState();
+        updateTagFilterHeader();
+        resized();
+        if (onTagFilterExpandedChanged)
+            onTagFilterExpandedChanged (tagFilterExpanded);
+    };
+    addAndMakeVisible (tagFilterToggle);
+    updateTagFilterHeader();
+
+    tagFilterSummary.setJustificationType (juce::Justification::centredLeft);
+    tagFilterSummary.setFont (juce::FontOptions (12.0f));
+    tagFilterSummary.setInterceptsMouseClicks (false, false);
+    addAndMakeVisible (tagFilterSummary);
+
+    tagStripViewport.setViewedComponent (&tagStrip, false);
+    tagStripViewport.setScrollBarsShown (true, false);
+    tagStripViewport.setScrollOnDragMode (juce::Viewport::ScrollOnDragMode::all);
+    addAndMakeVisible (tagStripViewport);
 
     stickyBank.setFont (juce::FontOptions (13.0f, juce::Font::bold));
     stickyBank.setJustificationType (juce::Justification::centredLeft);
@@ -118,6 +188,14 @@ void PatchBrowser::setTooltipsEnabled (bool on)
     tooltipsEnabled = on;
 }
 
+void PatchBrowser::setFavoritesOnly (bool on)
+{
+    if (favOnly.getToggleState() == on)
+        return;
+    favOnly.setToggleState (on, juce::dontSendNotification);
+    rebuildFiltered();
+}
+
 void PatchBrowser::updateBankChrome()
 {
     // Keep layout stable: always reserve button slots; only toggle visibility.
@@ -158,6 +236,7 @@ void PatchBrowser::setEntries (std::vector<PatchEntry> entries, FavoritesStore* 
         }
     }
     updateStickyHeader();
+    refreshTagStrip();
 }
 
 std::optional<PatchEntry> PatchBrowser::getSelectedVoice() const
@@ -176,15 +255,183 @@ void PatchBrowser::resized()
     nextBank.setBounds (top.removeFromRight (64).reduced (1));
     prevBank.setBounds (top.removeFromRight (64).reduced (1));
     groupToggle.setBounds (top.removeFromRight (72));
-    favOnly.setBounds (top.removeFromRight (90));
     search.setBounds (top.reduced (0, 2));
     r.removeFromTop (4);
+
+    {
+        auto header = r.removeFromTop (24);
+        favOnly.setBounds (header.removeFromLeft (90).reduced (1));
+        clearSearchBtn.setBounds (header.removeFromLeft (96).reduced (1));
+        clearSearchBtn.setEnabled (search.getText().isNotEmpty());
+        favOnly.setVisible (true);
+        clearSearchBtn.setVisible (true);
+
+        if (tagFilterHasCatalog)
+        {
+            tagFilterToggle.setBounds (header.removeFromLeft (96).reduced (1));
+            tagFilterSummary.setBounds (header.reduced (4, 0));
+            tagFilterToggle.setVisible (true);
+            tagFilterSummary.setVisible (true);
+        }
+        else
+        {
+            tagFilterToggle.setVisible (false);
+            tagFilterSummary.setVisible (false);
+            tagFilterSummary.setBounds ({});
+        }
+    }
+
+    if (tagFilterHasCatalog && tagFilterExpanded)
+    {
+        // Size the strip to the wrapped chips; only scroll if it would starve the table.
+        constexpr int kMinTableH = 140;
+        constexpr int kStickyReserve = 26;
+        const int maxBody = juce::jmax (28, r.getHeight() - kStickyReserve - kMinTableH);
+        rebuildTagStripButtons (r.getWidth());
+        if (tagStrip.getHeight() > maxBody)
+            rebuildTagStripButtons (juce::jmax (80, r.getWidth() - tagStripViewport.getScrollBarThickness()));
+
+        auto tagArea = r.removeFromTop (juce::jmin (tagStrip.getHeight(), maxBody));
+        tagStripViewport.setBounds (tagArea);
+        tagStripViewport.setVisible (true);
+        tagStripViewport.setScrollBarsShown (tagStrip.getHeight() > tagStripViewport.getHeight(), false);
+        r.removeFromTop (4);
+    }
+    else
+    {
+        tagStripViewport.setBounds ({});
+        tagStripViewport.setVisible (false);
+        if (tagFilterHasCatalog)
+            r.removeFromTop (4);
+    }
+
     // Always reserve sticky-header height so Bank <-> Single does not reflow the table.
     auto stickyArea = r.removeFromTop (24);
     r.removeFromTop (2);
     stickyBank.setBounds (stickyArea);
     stickyBank.setVisible (bankFileView && groupByBank);
     table.setBounds (r);
+}
+
+void PatchBrowser::refreshTagStrip()
+{
+    // Runs on the collapsed path too, where rebuildTagStripButtons never fires:
+    // without this the Show Tags toggle would stay hidden once tags exist.
+    if (tagStore == nullptr)
+        tagFilterHasCatalog = false;
+    else
+        tagFilterHasCatalog = ! tagStore->allUniqueTags().empty();
+
+    updateTagFilterHeader();
+    resized();
+}
+
+void PatchBrowser::setTagFilterExpanded (bool on)
+{
+    tagFilterExpanded = on;
+    tagFilterToggle.setToggleState (on, juce::dontSendNotification);
+    updateTagFilterHeader();
+    resized();
+}
+
+void PatchBrowser::updateTagFilterHeader()
+{
+    tagFilterToggle.setToggleState (tagFilterExpanded, juce::dontSendNotification);
+    tagFilterToggle.setButtonText ("Show Tags");
+
+    int activeCount = 0;
+    const auto q = LibraryFilter::parse (search.getText().toStdString(), favOnly.getToggleState());
+    for (const auto& group : q.orGroups)
+        for (const auto& atom : group.atoms)
+            if (atom.kind == LibraryFilterAtom::Kind::tag)
+                ++activeCount;
+
+    if (! tagFilterHasCatalog)
+        tagFilterSummary.setText ({}, juce::dontSendNotification);
+    else if (activeCount > 0)
+        tagFilterSummary.setText (juce::String (activeCount) + (activeCount == 1 ? " tag selected" : " tags selected"),
+                                  juce::dontSendNotification);
+    else
+        tagFilterSummary.setText (tagFilterExpanded
+                                      ? "Click = replace, Shift = AND, Ctrl/Cmd = OR"
+                                      : "Show tags to filter",
+                                  juce::dontSendNotification);
+}
+
+void PatchBrowser::rebuildTagStripButtons (int forWidth)
+{
+    tagStripButtons.clear();
+    tagStrip.removeAllChildren();
+
+    if (tagStore == nullptr)
+    {
+        tagFilterHasCatalog = false;
+        tagStrip.setSize (0, 0);
+        return;
+    }
+
+    const auto catalog = tagStore->allUniqueTags();
+    tagFilterHasCatalog = ! catalog.empty();
+    if (! tagFilterHasCatalog)
+    {
+        tagStrip.setSize (0, 0);
+        return;
+    }
+
+    const auto q = LibraryFilter::parse (search.getText().toStdString(), favOnly.getToggleState());
+    std::unordered_set<std::string> active;
+    for (const auto& group : q.orGroups)
+        for (const auto& atom : group.atoms)
+            if (atom.kind == LibraryFilterAtom::Kind::tag)
+                active.insert (atom.value);
+
+    constexpr int pad = 4;
+    constexpr int gap = 4;
+    constexpr int h = 22;
+    const int viewW = juce::jmax (80, forWidth > 0 ? forWidth
+                                                   : (tagStripViewport.getWidth() > 0 ? tagStripViewport.getWidth()
+                                                                                     : getWidth()));
+    int x = pad;
+    int y = pad;
+    int rowH = h;
+
+    for (const auto& name : catalog)
+    {
+        auto* b = tagStripButtons.add (new juce::TextButton (juce::String::fromUTF8 (name.c_str())));
+        b->setClickingTogglesState (true);
+        const auto lower = juce::String::fromUTF8 (name.c_str()).toLowerCase().toStdString();
+        b->setToggleState (active.count (lower) > 0, juce::dontSendNotification);
+        b->setTooltip ("Click: filter by this tag. Shift: AND. Ctrl or Cmd: OR. Click again to remove. tag:"
+                       + juce::String::fromUTF8 (name.c_str()));
+        const int tw = juce::jmax (44, b->getBestWidthForHeight (h));
+        if (x > pad && x + tw > viewW - pad)
+        {
+            x = pad;
+            y += rowH + gap;
+        }
+        b->setBounds (x, y, tw, h);
+        x += tw + gap;
+        b->onClick = [safe = juce::Component::SafePointer<PatchBrowser> (this), name]
+        {
+            // Capture modifiers before async - they are gone by the time the message runs.
+            const auto mods = juce::ModifierKeys::getCurrentModifiers();
+            using Combine = LibraryFilter::TagChipCombine;
+            Combine combine = Combine::replace;
+            // Ctrl/Cmd wins over Shift so OR stays reachable when both are held.
+            if (mods.isCommandDown() || mods.isCtrlDown())
+                combine = Combine::withOr;
+            else if (mods.isShiftDown())
+                combine = Combine::withAnd;
+            juce::MessageManager::callAsync ([safe, name, combine]
+            {
+                if (safe != nullptr)
+                    safe->toggleTagInSearch (name, combine);
+            });
+        };
+        tagStrip.addAndMakeVisible (b);
+    }
+
+    tagStrip.setSize (viewW, y + rowH + pad);
 }
 
 int PatchBrowser::nextSelectableRow (int from, int delta) const
@@ -326,6 +573,7 @@ void PatchBrowser::jumpNextBank()
 
 void PatchBrowser::textEditorTextChanged (juce::TextEditor&)
 {
+    clearSearchBtn.setEnabled (search.getText().isNotEmpty());
     startTimer (120);
 }
 
@@ -333,6 +581,7 @@ void PatchBrowser::timerCallback()
 {
     stopTimer();
     rebuildFiltered();
+    refreshTagStrip();
 }
 
 int PatchBrowser::compareEntries (const PatchEntry& a, const PatchEntry& b) const
@@ -677,12 +926,22 @@ void PatchBrowser::paintCell (juce::Graphics& g, int row, int columnId, int widt
             if (tagStore != nullptr)
             {
                 const auto tags = tagStore->getTags (e.contentId);
-                juce::StringArray parts;
-                for (const auto& t : tags)
-                    parts.add (juce::String::fromUTF8 (t.c_str()));
-                text = parts.joinIntoString (", ");
+                juce::Font font (juce::FontOptions (13.0f));
+                g.setFont (font);
+                const auto chips = layoutTagChips (tags, font, (float) width, (float) height);
+                const auto textColour = findColour (juce::Label::textColourId);
+                const auto bg = findColour (juce::TextEditor::backgroundColourId);
+                for (const auto& chip : chips)
+                {
+                    g.setColour (textColour.interpolatedWith (bg, 0.72f));
+                    g.fillRoundedRectangle (chip.bounds, 3.0f);
+                    g.setColour (textColour);
+                    g.drawText (juce::String::fromUTF8 (chip.name.c_str()),
+                                chip.bounds.toNearestInt(),
+                                juce::Justification::centred, true);
+                }
             }
-            break;
+            return;
         default: break;
     }
     g.drawText (text, 4, 0, width - 8, height, juce::Justification::centredLeft, true);
@@ -695,7 +954,7 @@ juce::String PatchBrowser::getCellTooltip (int rowNumber, int columnId)
     if (! juce::isPositiveAndBelow (rowNumber, static_cast<int> (rows.size())))
         return {};
     if (columnId == 6)
-        return "Click Tags cell to edit (OK / Cancel / Clear)";
+        return "Click a tag to filter. Shift = AND, Ctrl or Cmd = OR, Alt = edit tags. Right-click a voice for more.";
     const auto& e = rows[static_cast<size_t> (rowNumber)].entry;
     return juce::String::fromUTF8 (e.fileName.c_str()) + " - "
          + juce::String::fromUTF8 (e.absolutePath.string().c_str());
@@ -739,6 +998,46 @@ void PatchBrowser::selectedRowsChanged (int lastRowSelected)
         return;
     }
     loadRow (lastRowSelected, false);
+    // Mouse clicks also fire cellClicked after selection; skip the duplicate send there.
+    skipRedundantCellLoad = true;
+    juce::Component::SafePointer<PatchBrowser> safe (this);
+    juce::MessageManager::callAsync ([safe]
+    {
+        if (safe != nullptr)
+            safe->skipRedundantCellLoad = false;
+    });
+}
+
+void PatchBrowser::toggleTagInSearch (const std::string& tagName, LibraryFilter::TagChipCombine combine)
+{
+    const auto next = LibraryFilter::toggleAndTagToken (search.getText().toStdString(), tagName, combine);
+    search.setText (juce::String::fromUTF8 (next.c_str()), juce::dontSendNotification);
+    rebuildFiltered();
+    refreshTagStrip();
+}
+
+void PatchBrowser::clearSearch()
+{
+    if (search.getText().isEmpty())
+        return;
+    search.clear();
+    rebuildFiltered();
+    refreshTagStrip();
+}
+
+std::string PatchBrowser::tagAtCellPoint (int row, int width, int height, juce::Point<float> local) const
+{
+    if (tagStore == nullptr || ! juce::isPositiveAndBelow (row, static_cast<int> (rows.size())))
+        return {};
+    if (rows[static_cast<size_t> (row)].kind != BrowserRowKind::voice)
+        return {};
+    const auto tags = tagStore->getTags (rows[static_cast<size_t> (row)].entry.contentId);
+    juce::Font font (juce::FontOptions (13.0f));
+    const auto chips = layoutTagChips (tags, font, (float) width, (float) height);
+    for (const auto& chip : chips)
+        if (chip.bounds.contains (local))
+            return chip.name;
+    return {};
 }
 
 void PatchBrowser::editTagsForRow (int row)
@@ -751,15 +1050,51 @@ void PatchBrowser::editTagsForRow (int row)
     const auto id = rows[static_cast<size_t> (row)].entry.contentId;
     const auto name = toJuce (rows[static_cast<size_t> (row)].entry.voiceName);
     auto current = tagStore->getTags (id);
+    const auto catalog = tagStore->allUniqueTags();
 
     auto* aw = new juce::AlertWindow ("Edit tags",
                                       "Tags for \"" + name + "\" (comma-separated):",
-                                      juce::AlertWindow::QuestionIcon);
+                                      juce::AlertWindow::NoIcon);
     themeAlertWindow (*aw, getLookAndFeel());
     juce::StringArray parts;
     for (const auto& t : current)
         parts.add (toJuce (t));
     aw->addTextEditor ("tags", parts.joinIntoString (", "), "Tags");
+
+    if (! catalog.empty())
+    {
+        juce::StringArray items;
+        items.add ("(add existing tag...)");
+        for (const auto& t : catalog)
+            items.add (juce::String::fromUTF8 (t.c_str()));
+        aw->addComboBox ("addExisting", items, "Add existing");
+        if (auto* box = aw->getComboBoxComponent ("addExisting"))
+        {
+            box->onChange = [aw, box]
+            {
+                const int idx = box->getSelectedItemIndex();
+                if (idx <= 0)
+                    return;
+                const auto tag = box->getText().trim().toLowerCase();
+                box->setSelectedItemIndex (0, juce::dontSendNotification);
+                if (tag.isEmpty())
+                    return;
+                if (auto* ed = aw->getTextEditor ("tags"))
+                {
+                    juce::StringArray tokens;
+                    tokens.addTokens (ed->getText(), ",;", "");
+                    for (auto& t : tokens)
+                        t = t.trim().toLowerCase();
+                    tokens.removeEmptyStrings();
+                    if (tokens.contains (tag))
+                        return;
+                    tokens.add (tag);
+                    ed->setText (tokens.joinIntoString (", "));
+                }
+            };
+        }
+    }
+
     aw->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
     aw->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
     aw->addButton ("Clear", 2);
@@ -791,6 +1126,158 @@ void PatchBrowser::editTagsForRow (int row)
     }));
 }
 
+void PatchBrowser::showSearchFilterMenu()
+{
+    enum
+    {
+        fav = 1,
+        recent,
+        dupe,
+        tag,
+        andOp,
+        orOp,
+        clearSearchItem,
+        tagPickBase = 1000
+    };
+
+    juce::PopupMenu menu;
+    menu.setLookAndFeel (&getLookAndFeel());
+    menu.addSectionHeader ("Filter tokens");
+    menu.addItem (fav, "fav:  -  favorites only");
+    menu.addItem (recent, "recent:  -  recently loaded voices");
+    menu.addItem (dupe, "dupe:  -  voices that appear more than once");
+    menu.addItem (tag, "tag:  -  filter by tag (type name after)");
+
+    menu.addSeparator();
+    menu.addSectionHeader ("Tag filters");
+    const auto catalog = tagStore != nullptr ? tagStore->allUniqueTags() : std::vector<std::string> {};
+    {
+        juce::PopupMenu tagMenu;
+        if (catalog.empty())
+        {
+            tagMenu.addItem (-1, "(no tags yet)", false, false);
+        }
+        else
+        {
+            for (size_t i = 0; i < catalog.size(); ++i)
+                tagMenu.addItem (tagPickBase + static_cast<int> (i),
+                                 juce::String::fromUTF8 (catalog[i].c_str()));
+        }
+        menu.addSubMenu ("Pick existing tag", tagMenu);
+    }
+
+    menu.addSeparator();
+    menu.addSectionHeader ("Combine");
+    menu.addItem (andOp, "AND  -  require both sides (uppercase)");
+    menu.addItem (orOp, "OR  -  match either side (uppercase)");
+    menu.addSeparator();
+    menu.addItem (clearSearchItem, "Clear search", search.getText().isNotEmpty());
+
+    juce::Component::SafePointer<PatchBrowser> safe (this);
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&search),
+                        [safe, catalog] (int result)
+                        {
+                            if (safe == nullptr || result == 0)
+                                return;
+                            if (result >= tagPickBase
+                                && result < tagPickBase + static_cast<int> (catalog.size()))
+                            {
+                                safe->toggleTagInSearch (catalog[static_cast<size_t> (result - tagPickBase)]);
+                                return;
+                            }
+                            switch (result)
+                            {
+                                case fav: safe->insertSearchFilterToken ("fav:"); break;
+                                case recent: safe->insertSearchFilterToken ("recent:"); break;
+                                case dupe: safe->insertSearchFilterToken ("dupe:"); break;
+                                case tag: safe->insertSearchFilterToken ("tag:"); break;
+                                case andOp: safe->insertSearchFilterToken ("AND"); break;
+                                case orOp: safe->insertSearchFilterToken ("OR"); break;
+                                case clearSearchItem:
+                                    safe->clearSearch();
+                                    safe->search.grabKeyboardFocus();
+                                    break;
+                                default: break;
+                            }
+                        });
+}
+
+void PatchBrowser::insertSearchFilterToken (const juce::String& token)
+{
+    auto text = search.getText();
+    int caret = juce::jlimit (0, text.length(), search.getCaretPosition());
+    const bool isCombinator = token == "AND" || token == "OR";
+    const auto low = text.toLowerCase();
+
+    if (isCombinator)
+    {
+        if (text.trim().isEmpty())
+            return;
+    }
+    else if (token == "fav:" && low.contains ("fav:"))
+        return;
+    else if (token == "recent:" && low.contains ("recent:"))
+        return;
+    else if (token == "dupe:" && (low.contains ("dupe:") || low.contains ("dup:")))
+        return;
+
+    juce::String insert = token;
+    if (caret > 0 && ! juce::CharacterFunctions::isWhitespace (text[caret - 1]))
+        insert = " " + insert;
+    if (! isCombinator && token == "tag:")
+    {
+        // leave caret after tag: for typing the name
+    }
+    else if (isCombinator)
+    {
+        if (caret < text.length() && ! juce::CharacterFunctions::isWhitespace (text[caret]))
+            insert = insert + " ";
+        else if (caret >= text.length())
+            insert = insert + " ";
+    }
+
+    const auto next = text.substring (0, caret) + insert + text.substring (caret);
+    const int newCaret = caret + insert.length();
+    search.setText (next, juce::dontSendNotification);
+    search.grabKeyboardFocus();
+    search.setCaretPosition (newCaret);
+    rebuildFiltered();
+}
+
+void PatchBrowser::showVoiceContextMenu (int row)
+{
+    if (! juce::isPositiveAndBelow (row, static_cast<int> (rows.size())))
+        return;
+    if (rows[static_cast<size_t> (row)].kind != BrowserRowKind::voice)
+        return;
+
+    enum { editTags = 1, openInFolder = 2 };
+
+    juce::PopupMenu menu;
+    menu.setLookAndFeel (&getLookAndFeel());
+    menu.addItem (editTags, "Edit tags");
+    const auto& entry = rows[static_cast<size_t> (row)].entry;
+    const juce::File file (juce::String::fromUTF8 (entry.absolutePath.string().c_str()));
+    menu.addItem (openInFolder, "Open in folder", file.existsAsFile() || file.getParentDirectory().isDirectory());
+
+    juce::Component::SafePointer<PatchBrowser> safe (this);
+    menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition(),
+                        [safe, row, file] (int result)
+                        {
+                            if (safe == nullptr || result == 0)
+                                return;
+                            if (result == editTags)
+                                safe->editTagsForRow (row);
+                            else if (result == openInFolder)
+                            {
+                                if (file.existsAsFile())
+                                    file.revealToUser();
+                                else if (file.getParentDirectory().isDirectory())
+                                    file.getParentDirectory().revealToUser();
+                            }
+                        });
+}
+
 void PatchBrowser::cellClicked (int row, int columnId, const juce::MouseEvent& e)
 {
     if (! juce::isPositiveAndBelow (row, static_cast<int> (rows.size())))
@@ -803,6 +1290,12 @@ void PatchBrowser::cellClicked (int row, int columnId, const juce::MouseEvent& e
     if (rows[static_cast<size_t> (row)].kind == BrowserRowKind::sectionHeader)
         return;
 
+    if (e.mods.isPopupMenu())
+    {
+        showVoiceContextMenu (row);
+        return;
+    }
+
     if (columnId == 1)
     {
         const auto& entry = rows[static_cast<size_t> (row)].entry;
@@ -812,14 +1305,43 @@ void PatchBrowser::cellClicked (int row, int columnId, const juce::MouseEvent& e
         return;
     }
 
-    if (columnId == 6 || e.mods.isPopupMenu())
+    if (columnId == 6)
     {
-        editTagsForRow (row);
-        return;
+        // cellClicked MouseEvent is relative to the full row, not the Tags cell.
+        const int colIndex = table.getHeader().getIndexOfColumnId (6, true);
+        if (colIndex < 0)
+            return;
+        const auto colBounds = table.getHeader().getColumnPosition (colIndex);
+        const auto local = juce::Point<float> (e.position.x - (float) colBounds.getX(),
+                                               e.position.y);
+        const auto hit = tagAtCellPoint (row, colBounds.getWidth(), table.getRowHeight(), local);
+        if (! hit.empty())
+        {
+            if (e.mods.isAltDown())
+            {
+                editTagsForRow (row);
+                return;
+            }
+            using Combine = LibraryFilter::TagChipCombine;
+            Combine combine = Combine::replace;
+            if (e.mods.isCommandDown() || e.mods.isCtrlDown())
+                combine = Combine::withOr;
+            else if (e.mods.isShiftDown())
+                combine = Combine::withAnd;
+            toggleTagInSearch (hit, combine);
+            return;
+        }
+        // Missed a chip - fall through to normal row click / re-send.
     }
 
     if (row == table.getSelectedRow())
     {
+        // Re-click already-selected row: re-send. Skip if selectedRowsChanged just loaded this click.
+        if (skipRedundantCellLoad)
+        {
+            skipRedundantCellLoad = false;
+            return;
+        }
         lastSentRow = -1;
         loadRow (row, false);
     }

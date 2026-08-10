@@ -2,6 +2,7 @@
 
 #include "library/BrowserList.h"
 #include "library/FavoritesStore.h"
+#include "library/LibraryFilter.h"
 #include "library/PatchEntry.h"
 #include "library/RecentStore.h"
 #include "library/TagStore.h"
@@ -35,10 +36,8 @@ public:
     void setShowFileColumns (bool on);
     void setHideDuplicates (bool on);
     void setTooltipsEnabled (bool on);
-    bool getBankFileView() const { return bankFileView; }
-    bool getGroupByBank() const { return groupByBank; }
-    bool getHideDuplicates() const { return hideDuplicates; }
-    BrowserStats getStats() const { return lastStats; }
+    void setFavoritesOnly (bool on);
+    void setTagFilterExpanded (bool on);
 
     std::optional<PatchEntry> getSelectedVoice() const;
     std::optional<PatchEntry> getDraggedVoice() const { return draggedVoice; }
@@ -49,12 +48,15 @@ public:
     void setLoadCallback (LoadFn fn) { onLoad = std::move (fn); }
     void setFavoriteToggleCallback (FavFn fn) { onFav = std::move (fn); }
     void setBankFileViewChanged (std::function<void(bool)> fn) { onBankFileViewChanged = std::move (fn); }
+    void setOnFavoritesOnlyChanged (std::function<void(bool)> fn) { onFavoritesOnlyChanged = std::move (fn); }
+    void setOnTagFilterExpandedChanged (std::function<void(bool)> fn) { onTagFilterExpandedChanged = std::move (fn); }
     void setOnListFocused (std::function<void()> fn) { onListFocused = std::move (fn); }
     void setOnStatsChanged (StatsFn fn) { onStatsChanged = std::move (fn); }
     void setOnTagsChanged (TagsChangedFn fn) { onTagsChanged = std::move (fn); }
 
     void jumpPrevBank();
     void jumpNextBank();
+    void refreshTagStrip();
 
     juce::TableListBox& getTable() { return table; }
 
@@ -81,16 +83,47 @@ private:
     int nextSelectableRow (int from, int delta) const;
     bool moveSelectionBy (int delta);
     void editTagsForRow (int row);
+    void showVoiceContextMenu (int row);
+    void showSearchFilterMenu();
+    void insertSearchFilterToken (const juce::String& token);
+    void toggleTagInSearch (const std::string& tagName,
+                            LibraryFilter::TagChipCombine combine = LibraryFilter::TagChipCombine::replace);
+    void clearSearch();
+    /** Lay out tag chips for width; updates tagStrip size. */
+    void rebuildTagStripButtons (int forWidth = 0);
+    void updateTagFilterHeader();
+    /** Returns tag name under local cell point, or empty if none. */
+    std::string tagAtCellPoint (int row, int width, int height, juce::Point<float> local) const;
     void applyColumnSort (std::vector<PatchEntry>& voices, bool keepBankGroups) const;
     int compareEntries (const PatchEntry& a, const PatchEntry& b) const;
     static juce::String folderColumnText (const PatchEntry& e);
-    static bool isBankFileVoice (const PatchEntry& e) { return BrowserList::isBankFileVoice (e); }
 
-    juce::TextEditor search;
-    juce::ToggleButton favOnly { "Favorites" };
+    class SearchField : public juce::TextEditor
+    {
+    public:
+        std::function<void()> onShowFilterMenu;
+        void mouseDown (const juce::MouseEvent& e) override
+        {
+            juce::TextEditor::mouseDown (e);
+            // Left-click places the caret, then offers filter tokens; right-click keeps cut/copy/paste.
+            if (e.mods.isLeftButtonDown() && onShowFilterMenu != nullptr)
+                onShowFilterMenu();
+        }
+    };
+
+    SearchField search;
+    juce::TextButton clearSearchBtn { "Clear search" };
+    juce::TextButton favOnly { "Favorites" };
     juce::TextButton groupToggle { "Bank" };
     juce::TextButton prevBank { "< Bank" }, nextBank { "Bank >" };
     juce::Label stickyBank;
+    juce::TextButton tagFilterToggle { "Show Tags" };
+    juce::Label tagFilterSummary;
+    juce::Viewport tagStripViewport;
+    juce::Component tagStrip;
+    juce::OwnedArray<juce::TextButton> tagStripButtons;
+    bool tagFilterExpanded = false;
+    bool tagFilterHasCatalog = false;
     juce::TableListBox table { "patches", this };
     std::vector<PatchEntry> all;
     std::vector<BrowserRow> rows;
@@ -107,11 +140,15 @@ private:
     LoadFn onLoad;
     FavFn onFav;
     std::function<void(bool)> onBankFileViewChanged;
+    std::function<void(bool)> onFavoritesOnlyChanged;
+    std::function<void(bool)> onTagFilterExpandedChanged;
     std::function<void()> onListFocused;
     StatsFn onStatsChanged;
     TagsChangedFn onTagsChanged;
     BrowserStats lastStats;
     int lastSentRow = -1;
+    /** Set when selection change already loaded; consumed by cellClicked to avoid double-send. */
+    bool skipRedundantCellLoad = false;
     std::optional<PatchEntry> draggedVoice;
 };
 

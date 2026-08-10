@@ -33,6 +33,20 @@ TEST_CASE ("TagStore set get clear and file round-trip", "[library][tags]")
     dir.deleteRecursively();
 }
 
+TEST_CASE ("TagStore allUniqueTags sorted and unique", "[library][tags]")
+{
+    TagStore store;
+    store.addTag (1, "pad");
+    store.addTag (1, "bass");
+    store.addTag (2, "Bass");
+    store.addTag (2, "lead");
+    const auto all = store.allUniqueTags();
+    REQUIRE (all.size() == 3);
+    REQUIRE (all[0] == "bass");
+    REQUIRE (all[1] == "lead");
+    REQUIRE (all[2] == "pad");
+}
+
 TEST_CASE ("LibraryFilter tag token", "[library][filter][tags]")
 {
     TagStore tags;
