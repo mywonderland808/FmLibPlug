@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-08-11
+
 ### Added
 - Settings **Morph while playing**: *Frequency only (smooth pitch)* (default) streams osc coarse/fine/detune while keys are held and holds the rest for silence; *All parameters (full sweep)* streams every change live
 - Settings **Morph release hold (ms)** (0-2000, default 250): delay morph SysEx after the last note-off so a voice dump does not re-latch during the release tail; pad drag and note morph cancel the wait
