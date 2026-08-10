@@ -1,6 +1,7 @@
 #include "library/DeviceBuffer.h"
 #include "sysex/Dx7Formats.h"
 #include <cstring>
+#include <utility>
 
 namespace fmlib
 {
@@ -56,6 +57,18 @@ void DeviceBuffer::setSlot (int index0, PatchEntry entry)
         entry.voiceName = voiceNameFromData (entry.voice);
     entry.refreshSearchCache();
     voices[static_cast<size_t> (index0)] = std::move (entry);
+    dirty = true;
+}
+
+void DeviceBuffer::swapVoices (int indexA0, int indexB0)
+{
+    const int n = static_cast<int> (voices.size());
+    if (indexA0 < 0 || indexB0 < 0 || indexA0 >= n || indexB0 >= n || indexA0 == indexB0)
+        return;
+
+    std::swap (voices[static_cast<size_t> (indexA0)], voices[static_cast<size_t> (indexB0)]);
+    voices[static_cast<size_t> (indexA0)].bankSlot = indexA0 + 1;
+    voices[static_cast<size_t> (indexB0)].bankSlot = indexB0 + 1;
     dirty = true;
 }
 

@@ -4,6 +4,12 @@
 namespace fmlib
 {
 
+namespace
+{
+constexpr const char* kLibraryVoiceDrag = "fmlib-voice";
+constexpr const char* kDeviceReorderDrag = "fmlib-device-reorder";
+} // namespace
+
 DeviceBufferPanel::DeviceBufferPanel()
 {
     model.owner = this;
@@ -30,6 +36,7 @@ DeviceBufferPanel::DeviceBufferPanel()
     send.setTooltip ("Send 1 voice, or a full 32-voice bank if the buffer has 32 slots.");
     req1.setTooltip ("Get a 1-voice dump from the device.");
     req32.setTooltip ("Get a 32-voice bank dump from the device.");
+    list.setTooltip ("Drag to swap slots. Drop a library voice onto a slot to assign. Drag does not send to the device.");
 }
 
 void DeviceBufferPanel::setBuffer (DeviceBuffer* buffer)
@@ -50,6 +57,22 @@ void DeviceBufferPanel::refreshList()
     lastSentRow = -1;
     list.updateContent();
     list.repaint();
+}
+
+void DeviceBufferPanel::notifyDragEnded()
+{
+    dragOver = false;
+    dropHighlightRow = -1;
+    dragSourceRow = -1;
+    suppressLoad = false;
+    repaint();
+}
+
+void DeviceBufferPanel::selectRowSilent (int row)
+{
+    suppressLoad = true;
+    list.selectRow (row, false, false);
+    suppressLoad = false;
 }
 
 void DeviceBufferPanel::resized()
@@ -85,13 +108,24 @@ int DeviceBufferPanel::rowAtDrag (const SourceDetails& details) const
     return list.getRowContainingPosition (pos.x, pos.y);
 }
 
+bool DeviceBufferPanel::isLibraryVoiceDrag (const SourceDetails& details) const
+{
+    return details.description.toString() == kLibraryVoiceDrag;
+}
+
+bool DeviceBufferPanel::isReorderDrag (const SourceDetails& details) const
+{
+    return details.description.toString() == kDeviceReorderDrag;
+}
+
 bool DeviceBufferPanel::isInterestedInDragSource (const SourceDetails& dragSourceDetails)
 {
-    return dragSourceDetails.description.toString() == "fmlib-voice";
+    return isLibraryVoiceDrag (dragSourceDetails) || isReorderDrag (dragSourceDetails);
 }
 
 void DeviceBufferPanel::itemDragEnter (const SourceDetails& details)
 {
+    suppressLoad = true;
     dragOver = true;
     dropHighlightRow = rowAtDrag (details);
     // Do not expand/mutate the buffer until drop — cancel must leave Get-1 intact.
@@ -100,6 +134,7 @@ void DeviceBufferPanel::itemDragEnter (const SourceDetails& details)
 
 void DeviceBufferPanel::itemDragMove (const SourceDetails& details)
 {
+    suppressLoad = true;
     dragOver = true;
     dropHighlightRow = rowAtDrag (details);
     repaint();
@@ -119,11 +154,37 @@ void DeviceBufferPanel::itemDropped (const SourceDetails& details)
     dropHighlightRow = -1;
     repaint();
 
-    if (buf == nullptr || ! onQueryDragVoice)
+    if (buf == nullptr)
+    {
+        notifyDragEnded();
         return;
+    }
+
+    if (isReorderDrag (details))
+    {
+        if (dragSourceRow >= 0 && row >= 0 && dragSourceRow != row)
+        {
+            buf->swapVoices (dragSourceRow, row);
+            refreshList();
+            selectRowSilent (row);
+            reportStatus ("Swapped slots " + juce::String (dragSourceRow + 1)
+                          + " and " + juce::String (row + 1));
+        }
+        notifyDragEnded();
+        return;
+    }
+
+    if (! isLibraryVoiceDrag (details) || ! onQueryDragVoice)
+    {
+        notifyDragEnded();
+        return;
+    }
     auto voice = onQueryDragVoice();
     if (! voice)
+    {
+        notifyDragEnded();
         return;
+    }
 
     buf->ensureEditableBank();
     int slot = row;
@@ -133,12 +194,15 @@ void DeviceBufferPanel::itemDropped (const SourceDetails& details)
         slot = kBankVoiceCount - 1;
     buf->setSlot (slot, *voice);
     refreshList();
-    list.selectRow (slot, false, false);
+    selectRowSilent (slot);
     reportStatus ("Dropped into slot " + juce::String (slot + 1));
+    notifyDragEnded();
 }
 
 void DeviceBufferPanel::loadRow (int row)
 {
+    if (suppressLoad)
+        return;
     if (buf == nullptr || ! onLoadVoice)
         return;
     const auto& voices = buf->getVoices();
@@ -173,14 +237,14 @@ void DeviceBufferPanel::Model::paintListBoxItem (int row, juce::Graphics& g, int
 
 void DeviceBufferPanel::Model::selectedRowsChanged (int lastRowSelected)
 {
-    if (owner == nullptr)
+    if (owner == nullptr || owner->suppressLoad)
         return;
     owner->loadRow (lastRowSelected);
 }
 
 void DeviceBufferPanel::Model::listBoxItemClicked (int row, const juce::MouseEvent&)
 {
-    if (owner == nullptr)
+    if (owner == nullptr || owner->suppressLoad)
         return;
     owner->list.grabKeyboardFocus();
     if (owner->onListFocused)
@@ -190,6 +254,18 @@ void DeviceBufferPanel::Model::listBoxItemClicked (int row, const juce::MouseEve
         owner->lastSentRow = -1;
         owner->loadRow (row);
     }
+}
+
+juce::var DeviceBufferPanel::Model::getDragSourceDescription (const juce::SparseSet<int>& rowsToDescribe)
+{
+    if (owner == nullptr || owner->buf == nullptr || rowsToDescribe.size() == 0)
+        return {};
+    const int row = rowsToDescribe[0];
+    if (! juce::isPositiveAndBelow (row, static_cast<int> (owner->buf->getVoices().size())))
+        return {};
+    owner->suppressLoad = true;
+    owner->dragSourceRow = row;
+    return juce::var (kDeviceReorderDrag);
 }
 
 } // namespace fmlib

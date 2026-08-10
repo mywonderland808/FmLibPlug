@@ -28,6 +28,8 @@ public:
     void itemDragMove (const SourceDetails& dragSourceDetails) override;
     void itemDragExit (const SourceDetails&) override;
     void itemDropped (const SourceDetails& dragSourceDetails) override;
+    /** Clears drag-silence state when a DnD operation finishes (drop or cancel). */
+    void notifyDragEnded();
 
     ActionFn onRequest1, onRequest32, onSave, onClear, onSend;
     LoadFn onLoadVoice;
@@ -45,7 +47,10 @@ private:
     juce::ListBox list { "device", nullptr };
     int lastSentRow = -1;
     int dropHighlightRow = -1;
+    int dragSourceRow = -1;
     bool dragOver = false;
+    /** When true, selection changes must not SysEx-load to the device. */
+    bool suppressLoad = false;
 
     class Model : public juce::ListBoxModel
     {
@@ -55,10 +60,14 @@ private:
         void paintListBoxItem (int row, juce::Graphics&, int w, int h, bool selected) override;
         void listBoxItemClicked (int row, const juce::MouseEvent&) override;
         void selectedRowsChanged (int lastRowSelected) override;
+        juce::var getDragSourceDescription (const juce::SparseSet<int>& rowsToDescribe) override;
     } model;
 
     void loadRow (int row);
+    void selectRowSilent (int row);
     int rowAtDrag (const SourceDetails& details) const;
+    bool isLibraryVoiceDrag (const SourceDetails& details) const;
+    bool isReorderDrag (const SourceDetails& details) const;
     void reportStatus (const juce::String& s);
 };
 

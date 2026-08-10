@@ -23,6 +23,8 @@ public:
     void ensureEditableBank();
 
     void setSlot (int index0, PatchEntry entry);
+    /** Swap two voices; bankSlot values follow their new indices. */
+    void swapVoices (int indexA0, int indexB0);
     PatchEntry makeEmptySlot (int bankSlot1to32) const;
 
     const std::vector<PatchEntry>& getVoices() const { return voices; }
