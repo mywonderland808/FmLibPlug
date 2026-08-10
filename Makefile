@@ -146,7 +146,7 @@ write-stamp:
 	stamp="$(ARTEFACT_ROOT)/BUILD_STAMP.txt"; \
 	shared=$$(fmlib_shared_lib "$(ARTEFACT_ROOT)" || true); \
 	{ \
-	  echo "version=1.1.0"; \
+	  echo "version=1.2.0"; \
 	  echo "config=$(CONFIG)"; \
 	  echo "os=$(FMLIB_OS)"; \
 	  echo "built_utc=$$(date -u +%Y-%m-%dT%H:%M:%SZ)"; \

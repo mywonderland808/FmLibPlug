@@ -7,6 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Settings **Morph while playing**: *Frequency only (smooth pitch)* (default) streams osc coarse/fine/detune while keys are held and holds the rest for silence; *All parameters (full sweep)* streams every change live
+- Settings **Morph release hold (ms)** (0-2000, default 250): delay morph SysEx after the last note-off so a voice dump does not re-latch during the release tail; pad drag and note morph cancel the wait
+- Settings **Note morph settle (ms)** (0-100, default 40): gap after a morph voice dump finishes on the wire before the delayed note-on
+- Settings **Reset defaults** restores morph, audition, UI options, SysEx pacing and controller thru (MIDI ports/channel, tags and library folders unchanged); sliders still double-click to factory
+- `MorphTransport` planner: coalesced targets, per-tick byte budget, timestamped MIDI egress
+- Opt-in hardware morph probe: `FMLIBPLUG_HW_MORPH_PROBE=1` with `FmLibPlugHwMidiTest`
+- Library / morph preset context menu: Open in folder
+- Morph parameter lock groups with session defaults in prefs and per morph preset (including lock-reference pad position)
+- Morph lock reference pad marker (right-drag); locked groups sample that point
+- Morph edge-walk LFO (CW/CCW + rate) paced by the morph transport budget
+- Dedicated MIDI controller input; Morph page Note morph: Off / Random / Edges
+- Optional forward of controller MIDI to output (default off)
+- Library tag filter: collapsible chip panel (Show Tags); Shift+click AND / Ctrl-Cmd+click OR
+- Search field filter-token menu; tag chip click toggles `tag:…` AND filter
+- Device buffer drag-and-drop slot swap; native folder chooser on Save
+- Catch2 coverage for morph transport, lock prefs, tag filter / DNF, and related helpers
+
+### Changed
+- Note morph Random/Edges jumps on the first key of a phrase, then delays note-on until SysEx lead-in finishes (audition uses the same lead-in); later chord tones stay polyphonic on that voice
+- Morph egress respects **Morph release hold**; note jump and direct pad gestures cancel it
+- Minimum editor height raised to 850 px for the Settings checklist
+- Morph **Clear** clears corner voices only; **Reset** restores locks and lock reference
+- Factory morph locks are **EG + Levels** (`morphLockSchema` 2); Freq lock split into **Coarse** and **Fine**
+- Voice morph uses nearest-neighbour for discrete VCED fields plus a silence guard on operator levels
+- Full morph voice dumps only when idle (or no baseline); while notes sound, budgeted parameter changes follow the stream mode
+- Morph live param-diffs skip voice-name bytes; name is sent via full dump when pad drag ends
+- Morph pad requires all four corners before sending; unset corners are dimmed
+- Morph drag emit interval defaults to 150 ms (Settings 20–250); click stays a full voice dump
+- Morph voice name is one char from each corner plus pad percent (10-char DX7 limit)
+- Morph Presets: click/arrow auto-loads; empty preset name field uses the morph name; save selected to Device buffer slot 1–32
+- Settings auto-apply on change; MIDI ports still need **Open MIDI ports**
+- Favorites is a toolbar toggle; Clear search sits left of Show Tags
+
+### Fixed
+- Settings Reset defaults / slider double-click used saved prefs instead of compile-time factories
+- Morph SysEx slices no longer overlap on the wire; thru notes count as sounding
+- Note morph lead-in stays idle until note-on and covers dumps still queued behind busy wire
+- Morph forceCommit clears when idle; bank/voice dumps invalidate the morph baseline without leaving an immortal timer
+- Controller-thru note tracking is locked and synced on the message thread
+- Queued SysEx and auto-tag callbacks use a shared alive flag so teardown cannot touch freed memory
+- Tag OR uses Ctrl or Cmd; Shift+AND after OR expands to DNF (including trailing AND / partial presence)
+- Library voice selection no longer sends the SysEx dump twice
+- Tag chip clicks use row-relative coordinates; left-click no longer opens the edit dialog
+- Tooltips work again (`TooltipWindow`; respects Show tooltips)
+- `dupe: OR fav:` (and other flag ORs) use union semantics; search ops are uppercase `AND`/`OR` only
+
 ## [1.1.0] - 2026-08-08
 
 ### Added

@@ -1,6 +1,6 @@
 # FmLibPlug
 
-**Version 1.1.0** — AGPL-3.0 JUCE 8 MIDI librarian for **Yamaha DX7 mkI / TX7** voice SysEx.
+**Version 1.2.0** — AGPL-3.0 JUCE 8 MIDI librarian for **Yamaha DX7 mkI / TX7** voice SysEx.
 
 Product name: **FmLibPlug**. Release notes: [CHANGELOG.md](CHANGELOG.md). Version source: `project(FmLibPlug VERSION ...)` in `CMakeLists.txt`. Cross-platform notes: [docs/PLATFORM.md](docs/PLATFORM.md).
 
@@ -12,9 +12,22 @@ Product name: **FmLibPlug**. Release notes: [CHANGELOG.md](CHANGELOG.md). Versio
 - Load **1 voice** (edit buffer) or **32-voice bank** via direct MIDI out; audition note
 - Get / receive dumps into a temporary device buffer; drag-drop bank edit; **Send** (1 voice or full 32-bank) / **Save...**
 - Favorites + search (`fav:` / `star:` / `tag:` / `dupe:` / `recent:` / AND/OR) + auto-tag (merge); click Tags to edit; Reset all tags in Settings
-- XY morpher (4 corners + morph presets)
+- XY morpher (4 corners + morph presets; parameter locks; edge LFO; Note morph via controller MIDI in)
+- Morph while playing: frequency-only (default) or all-parameter streaming (see below)
 - Dark / light theme, hardware checklist in Settings; resizable editor
-- SysEx pacing; audio **passthrough** insert
+- SysEx pacing; separate MIDI device vs controller inputs; audio **passthrough** insert
+
+### Morph on DX7 mkI / TX7
+
+Mid-note voice SysEx on an original DX7 / TX7 clicks or glitches, and that can be musical (think Microwave-style wavetable sweeps). Settings has three morph timing controls:
+
+- **Morph while playing**
+  - **Frequency only (smooth pitch)** — default. Oscillator coarse/fine/detune glide live; everything else waits for the next full dump once you stop playing.
+  - **All parameters (full sweep)** — the whole voice sweeps in real time, clicks included.
+- **Morph release hold (ms)** (default 250, 0–2000) — how long that saved-up dump waits after the last note-off, so it does not re-latch the patch during the release tail. Raise it for long envelopes; 0 sends immediately. A note morph or a direct pad click/drag cancels the wait; the LFO and the automatic flush still respect it. Playing again before the hold ends restarts the timer from that release.
+- **Note morph settle (ms)** (default 40, 0–100) — extra gap after the voice dump finishes on the wire before the delayed note-on. Wire time is measured automatically; raise this if note morphs still click on the attack.
+
+Note morph jumps on the first key of a phrase and delays that note-on so the SysEx lands first. Factory locks keep **EG + Levels** at the **lock reference** (hollow marker; right-drag on the pad). Moving Ref does not send SysEx until the next pad morph. Notes on the TX7's own keys need the controller input. **Reset defaults** restores morph, audition, UI options, SysEx pacing and controller thru (MIDI ports/channel, tags and library folders stay as they are).
 
 ## Requirements
 
