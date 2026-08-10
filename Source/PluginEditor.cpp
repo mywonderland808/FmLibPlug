@@ -40,6 +40,16 @@ FmLibPlugAudioProcessorEditor::FmLibPlugAudioProcessorEditor (FmLibPlugAudioProc
     devicePanel.setBuffer (&plugin.deviceBuffer);
     devicePanel.onStatus = [this] (const juce::String& s) { setMidiStatus (s); };
     morpher.setPresetStore (&plugin.morphPresets);
+    morpher.setEmitIntervalMs (plugin.prefs.morphEmitMs);
+    morpher.setDefaultLockGroups (plugin.prefs.morphLockGroups);
+    morpher.setLockGroups (plugin.prefs.morphLockGroups);
+    morpher.setDefaultLockRefPosition (plugin.prefs.morphLockRefX, plugin.prefs.morphLockRefY);
+    morpher.setLockRefPosition (plugin.prefs.morphLockRefX, plugin.prefs.morphLockRefY);
+    morpher.setLfoEnabled (plugin.prefs.morphLfoEnabled);
+    morpher.setLfoRateHz (plugin.prefs.morphLfoRateHz);
+    morpher.setNoteJumpMode (static_cast<fmlib::MorpherPanel::NoteJumpMode> (
+        juce::jlimit (0, 2, plugin.prefs.morphNoteJumpMode)));
+    plugin.midi.setControllerNotesToCallbacksOnly (plugin.prefs.morphNoteJumpMode != 0);
 
     plugin.library.addListener ([safe = juce::Component::SafePointer<FmLibPlugAudioProcessorEditor> (this)]
     {
@@ -57,6 +67,57 @@ FmLibPlugAudioProcessorEditor::FmLibPlugAudioProcessorEditor (FmLibPlugAudioProc
             safe->setMidiStatus (s);
         });
     });
+
+    plugin.midi.setControllerNoteOnCallback (
+        [safe = juce::Component::SafePointer<FmLibPlugAudioProcessorEditor> (this)] (int note, int velocity)
+        {
+            juce::MessageManager::callAsync ([safe, note, velocity]
+            {
+                if (safe == nullptr)
+                    return;
+                const bool jumpOn = safe->morpher.getNoteJumpMode() != fmlib::MorpherPanel::NoteJumpMode::off;
+                const bool firstOfPhrase = safe->controllerHeldNotes.empty();
+                safe->controllerHeldNotes.insert (note);
+
+                if (jumpOn)
+                {
+                    // Morph before the note so the new voice is on the wire when it sounds.
+                    // Chord tones during lead-in join the same delayed batch.
+                    if (firstOfPhrase || safe->plugin.hasPendingControllerLeadIn())
+                    {
+                        if (firstOfPhrase)
+                        {
+                            // The incoming note masks any release tail, so don't hold the dump.
+                            safe->plugin.midi.cancelMorphReleaseGuard();
+                            safe->morpher.applyNoteJump();
+                        }
+                        safe->plugin.playControllerNoteAfterDelay (note, velocity, safe->morphNoteLeadMs());
+                    }
+                    else
+                    {
+                        safe->plugin.playControllerNote (note, velocity);
+                    }
+                }
+                else if (! safe->plugin.prefs.midiControllerThru)
+                {
+                    safe->plugin.playControllerNote (note, velocity);
+                }
+            });
+        });
+    plugin.midi.setControllerNoteOffCallback (
+        [safe = juce::Component::SafePointer<FmLibPlugAudioProcessorEditor> (this)] (int note, int)
+        {
+            juce::MessageManager::callAsync ([safe, note]
+            {
+                if (safe == nullptr)
+                    return;
+                const bool jumpOn = safe->morpher.getNoteJumpMode() != fmlib::MorpherPanel::NoteJumpMode::off;
+                safe->controllerHeldNotes.erase (note);
+                if (jumpOn || ! safe->plugin.prefs.midiControllerThru)
+                    safe->plugin.releaseControllerNote (note);
+                // Next jump happens on the next note-on, with its own SysEx lead-in.
+            });
+        });
 
     browser.setLoadCallback ([this] (const fmlib::PatchEntry& e, bool loadBank)
     {
@@ -100,9 +161,21 @@ FmLibPlugAudioProcessorEditor::FmLibPlugAudioProcessorEditor (FmLibPlugAudioProc
     browser.setShowFileColumns (plugin.prefs.showFileColumns);
     browser.setHideDuplicates (plugin.prefs.hideDuplicates);
     browser.setTooltipsEnabled (plugin.prefs.showTooltips);
+    browser.setFavoritesOnly (plugin.prefs.favoritesOnly);
+    browser.setTagFilterExpanded (plugin.prefs.tagFilterExpanded);
+    browser.setOnTagFilterExpandedChanged ([this] (bool on)
+    {
+        plugin.prefs.tagFilterExpanded = on;
+        plugin.persistPreferences();
+    });
     browser.setBankFileViewChanged ([this] (bool banks)
     {
         plugin.prefs.bankFileView = banks;
+        plugin.persistPreferences();
+    });
+    browser.setOnFavoritesOnlyChanged ([this] (bool on)
+    {
+        plugin.prefs.favoritesOnly = on;
         plugin.persistPreferences();
     });
     browser.setOnStatsChanged ([this] (const fmlib::BrowserStats& st)
@@ -113,6 +186,7 @@ FmLibPlugAudioProcessorEditor::FmLibPlugAudioProcessorEditor (FmLibPlugAudioProc
     browser.setOnTagsChanged ([this]
     {
         plugin.persistPreferences();
+        browser.refreshTagStrip();
         browser.getTable().repaint();
     });
 
@@ -133,16 +207,73 @@ FmLibPlugAudioProcessorEditor::FmLibPlugAudioProcessorEditor (FmLibPlugAudioProc
     auditionBtn.onClick = [this]
     {
         syncAuditionPrefsFromSettings();
-        plugin.auditionNote();
+        if (morpher.getNoteJumpMode() != fmlib::MorpherPanel::NoteJumpMode::off)
+        {
+            plugin.midi.cancelMorphReleaseGuard();
+            morpher.applyNoteJump();
+            plugin.auditionNoteAfterDelay (morphNoteLeadMs());
+        }
+        else
+        {
+            plugin.auditionNote();
+        }
         restoreListFocus();
     };
 
-    morpher.onMorph = [this] (const fmlib::VoiceData& v)
+    morpher.onMorph = [this] (const fmlib::VoiceData& v, bool dragEmit)
     {
-        // Morph drag: MIDI only, unpaced — skip recent ring / processor side effects.
-        plugin.midi.sendVoice (v, false);
+        // Drag/LFO: stream under budget. Click / drag-end / jump: commit (full dump when idle).
+        plugin.midi.sendMorphVoice (v, ! dragEmit);
     };
+    // Driving the pad by hand outranks the release hold: a click you asked for beats a
+    // pad that ignores you for the length of the hold.
+    morpher.onPadGestureStarted = [this] { plugin.midi.cancelMorphReleaseGuard(); };
+    morpher.onMorphInvalidate = [this] { plugin.midi.invalidateMorphBaseline(); };
     morpher.onPresetsChanged = [this] { plugin.persistPreferences(); };
+    morpher.onMorphUiPrefsChanged = [this]
+    {
+        // Persist LFO / note-jump and lock *defaults* (Set default updates those).
+        plugin.prefs.morphLockGroups = morpher.getDefaultLockGroups();
+        plugin.prefs.morphLockRefX = morpher.getDefaultLockRefX();
+        plugin.prefs.morphLockRefY = morpher.getDefaultLockRefY();
+        plugin.prefs.morphLfoEnabled = morpher.getLfoEnabled();
+        plugin.prefs.morphLfoRateHz = morpher.getLfoRateHz();
+        plugin.prefs.morphNoteJumpMode = static_cast<int> (morpher.getNoteJumpMode());
+        plugin.midi.setControllerNotesToCallbacksOnly (plugin.prefs.morphNoteJumpMode != 0);
+        plugin.persistPreferences();
+    };
+    morpher.onNoteJumpArmed = [this]
+    {
+        if (controllerHeldNotes.empty())
+            prepareNextMorphJump();
+    };
+    morpher.onSaveToDeviceSlot = [this] (const fmlib::VoiceData& voice, int slot1to32)
+    {
+        fmlib::PatchEntry e;
+        e.voice = voice;
+        e.voiceName = fmlib::voiceNameFromData (voice);
+        e.fileName = "morph";
+        e.relativePath = "Morph";
+        e.contentId = fmlib::contentIdFromVoice (voice);
+        e.bankSlot = slot1to32;
+        e.refreshSearchCache();
+        plugin.deviceBuffer.setSlot (slot1to32 - 1, std::move (e));
+        devicePanel.refreshList();
+        setMidiStatus ("Saved morph preset to device buffer slot " + juce::String (slot1to32));
+    };
+    morpher.onRevealMorphPresetsFile = [this]
+    {
+        const auto f = plugin.morphPresetsFile();
+        if (f.existsAsFile())
+            f.revealToUser();
+        else
+        {
+            f.getParentDirectory().createDirectory();
+            f.getParentDirectory().revealToUser();
+        }
+        setMidiStatus ("Morph presets: " + f.getFullPathName());
+    };
+    morpher.onStatus = [this] (const juce::String& s) { setMidiStatus (s); };
     morpher.onRequestAssignCorner = [this] (int corner)
     {
         if (auto sel = browser.getSelectedVoice())
@@ -197,6 +328,16 @@ FmLibPlugAudioProcessorEditor::FmLibPlugAudioProcessorEditor (FmLibPlugAudioProc
         browser.setHideDuplicates (plugin.prefs.hideDuplicates);
         plugin.persistPreferences();
     };
+    settings.onMorphPrefsChanged = [this] { syncMorphPrefsFromSettings(); };
+    settings.onMidiParamsChanged = [this] { syncMidiParamsFromSettings(); };
+    settings.onApplyMidiPorts = [this] { applyMidiPortsFromSettings(); };
+    settings.onFoldersChanged = [this] { syncFoldersFromSettings(); };
+    settings.onAuditionChanged = [this]
+    {
+        syncAuditionPrefsFromSettings();
+        plugin.persistPreferences();
+    };
+    settings.onTooltipsChanged = [this] { syncTooltipsFromSettings(); };
     settings.onAddFolder = [this]
     {
         auto chooser = std::make_shared<juce::FileChooser> ("Add library folder");
@@ -209,10 +350,9 @@ FmLibPlugAudioProcessorEditor::FmLibPlugAudioProcessorEditor (FmLibPlugAudioProc
                               });
     };
     settings.onRemoveFolder = [this] { settings.removeSelectedFolder(); };
-    settings.onApply = [this] { applySettingsFromPanel(); };
     settings.onAutoTag = [this]
     {
-        setMidiStatus ("Auto-tagging library…");
+        setMidiStatus ("Auto-tagging library...");
         plugin.autoTagLibrary ([safe = juce::Component::SafePointer<FmLibPlugAudioProcessorEditor> (this)]
         {
             if (safe == nullptr)
@@ -244,9 +384,15 @@ FmLibPlugAudioProcessorEditor::FmLibPlugAudioProcessorEditor (FmLibPlugAudioProc
 
     settings.setFolderPaths (plugin.library.getBaseFolders());
     settings.setMidiLists (plugin.midi.getInputNames(), plugin.midi.getOutputNames());
-    settings.setMidiSelection (plugin.prefs.midiInputName, plugin.prefs.midiOutputName);
+    settings.setMidiSelection (plugin.prefs.midiInputName, plugin.prefs.midiOutputName,
+                               plugin.prefs.midiControllerInputName);
     settings.setChannel (plugin.prefs.midiChannel);
     settings.setPacingMs (plugin.prefs.sysexPacingMs);
+    settings.setMorphEmitMs (plugin.prefs.morphEmitMs);
+    settings.setMorphReleaseGuardMs (plugin.prefs.morphReleaseGuardMs);
+    settings.setMorphNoteSettleMs (plugin.prefs.morphNoteSettleMs);
+    settings.setMorphStreamMode (plugin.prefs.morphStreamMode);
+    settings.setMidiControllerThru (plugin.prefs.midiControllerThru);
     settings.setDarkTheme (plugin.prefs.darkTheme);
     settings.setGroupByBank (plugin.prefs.groupByBank);
     settings.setShowFileColumns (plugin.prefs.showFileColumns);
@@ -260,16 +406,28 @@ FmLibPlugAudioProcessorEditor::FmLibPlugAudioProcessorEditor (FmLibPlugAudioProc
     updateModeButtons();
     // Tall enough for 32 device-buffer rows; user can resize further in supporting hosts.
     setResizable (true, true);
-    setResizeLimits (960, 780, 2400, 1600);
+    // Minimum height is set by the Settings stack: below this the checklist and
+    // Reset defaults fall off the bottom.
+    setResizeLimits (960, 850, 2400, 1600);
     setSize (1100, 900);
+    syncTooltipWindow();
     startTimerHz (4);
 }
 
 FmLibPlugAudioProcessorEditor::~FmLibPlugAudioProcessorEditor()
 {
+    plugin.releaseAllControllerNotes();
     plugin.library.clearListeners();
     plugin.midi.setStatusCallback (nullptr);
+    plugin.midi.setControllerNoteOnCallback (nullptr);
+    plugin.midi.setControllerNoteOffCallback (nullptr);
     setLookAndFeel (nullptr);
+}
+
+void FmLibPlugAudioProcessorEditor::syncTooltipWindow()
+{
+    // JUCE has no enable flag; a huge delay effectively disables tips.
+    tooltipWindow.setMillisecondsBeforeTipAppears (plugin.prefs.showTooltips ? 700 : 0x7fffffff);
 }
 
 void FmLibPlugAudioProcessorEditor::syncChromeColours()
@@ -309,6 +467,81 @@ void FmLibPlugAudioProcessorEditor::syncAuditionPrefsFromSettings()
     plugin.prefs.auditionNote = settings.getAuditionNote();
     plugin.prefs.auditionVelocity = settings.getAuditionVelocity();
     plugin.prefs.auditionDurationMs = settings.getAuditionDurationMs();
+}
+
+void FmLibPlugAudioProcessorEditor::syncMorphPrefsFromSettings()
+{
+    plugin.prefs.morphEmitMs = settings.getMorphEmitMs();
+    plugin.prefs.morphReleaseGuardMs = settings.getMorphReleaseGuardMs();
+    plugin.prefs.morphNoteSettleMs = settings.getMorphNoteSettleMs();
+    plugin.prefs.midiControllerThru = settings.getMidiControllerThru();
+    plugin.prefs.morphStreamMode = settings.getMorphStreamMode();
+    morpher.setEmitIntervalMs (plugin.prefs.morphEmitMs);
+    plugin.midi.setMorphReleaseGuardMs (plugin.prefs.morphReleaseGuardMs);
+    plugin.midi.setControllerThru (plugin.prefs.midiControllerThru);
+    plugin.midi.setMorphStreamMode (static_cast<fmlib::MorphStreamMode> (
+        juce::jlimit (0, 1, plugin.prefs.morphStreamMode)));
+    const int budget = juce::jlimit (14, 70,
+                                     (plugin.prefs.morphEmitMs <= 50 ? 56
+                                      : (plugin.prefs.morphEmitMs >= 200 ? 28 : 42)));
+    plugin.midi.setMorphByteBudget (budget);
+    plugin.persistPreferences();
+}
+
+int FmLibPlugAudioProcessorEditor::morphNoteLeadMs() const
+{
+    // Wire time is measured (busy queue plus any dump not scheduled yet); the settle
+    // margin on top is how long the synth needs to apply the voice, which is the user's
+    // to tune. Clamp the wire part only, so a large settle is never capped away.
+    const int wire = plugin.midi.getMorphLeadEstimateMs() + juce::jmax (1, plugin.prefs.sysexPacingMs);
+    const int settle = juce::jlimit (0, 100, plugin.prefs.morphNoteSettleMs);
+    return juce::jlimit (settle, 400 + settle, wire + settle);
+}
+
+void FmLibPlugAudioProcessorEditor::prepareNextMorphJump()
+{
+    if (morpher.getNoteJumpMode() == fmlib::MorpherPanel::NoteJumpMode::off)
+        return;
+    if (! controllerHeldNotes.empty())
+        return;
+    morpher.applyNoteJump();
+}
+
+void FmLibPlugAudioProcessorEditor::syncMidiParamsFromSettings()
+{
+    const int prevChannel = plugin.midi.getChannel();
+    plugin.midi.setChannel (settings.getChannel());
+    plugin.midi.setSysexPacingMs (settings.getPacingMs());
+    if (prevChannel != plugin.midi.getChannel())
+        plugin.midi.invalidateMorphBaseline();
+    plugin.persistPreferences();
+}
+
+void FmLibPlugAudioProcessorEditor::applyMidiPortsFromSettings()
+{
+    plugin.midi.openInputByName (settings.getMidiIn());
+    plugin.midi.openControllerInputByName (settings.getMidiControllerIn());
+    plugin.midi.openOutputByName (settings.getMidiOut());
+    plugin.midi.invalidateMorphBaseline();
+    plugin.persistPreferences();
+    setMidiStatus ("MIDI ports opened");
+}
+
+void FmLibPlugAudioProcessorEditor::syncFoldersFromSettings()
+{
+    plugin.library.setBaseFolders (settings.getFolderPaths());
+    plugin.persistPreferences();
+    plugin.library.rescanAsync();
+    refreshLibraryView();
+    setMidiStatus ("Scanning...");
+}
+
+void FmLibPlugAudioProcessorEditor::syncTooltipsFromSettings()
+{
+    plugin.prefs.showTooltips = settings.getTooltipsEnabled();
+    browser.setTooltipsEnabled (plugin.prefs.showTooltips);
+    syncTooltipWindow();
+    plugin.persistPreferences();
 }
 
 void FmLibPlugAudioProcessorEditor::restoreListFocus()
@@ -410,8 +643,14 @@ void FmLibPlugAudioProcessorEditor::timerCallback()
         setMidiStatus ("Scanning...");
 }
 
+void FmLibPlugAudioProcessorEditor::dragOperationEnded (const juce::DragAndDropTarget::SourceDetails&)
+{
+    devicePanel.notifyDragEnded();
+}
+
 void FmLibPlugAudioProcessorEditor::refreshLibraryView()
 {
+    browser.setFavoritesOnly (plugin.prefs.favoritesOnly);
     auto entries = plugin.library.getEntriesCopy();
     browser.setEntries (std::move (entries), &plugin.favorites, &plugin.tags, &plugin.recent);
     browser.setBankFileView (plugin.prefs.bankFileView);
@@ -429,30 +668,6 @@ void FmLibPlugAudioProcessorEditor::refreshLibraryView()
         else
             updateStatusBar();
     }
-}
-
-void FmLibPlugAudioProcessorEditor::applySettingsFromPanel()
-{
-    plugin.prefs.darkTheme = settings.getDarkTheme();
-    plugin.prefs.groupByBank = settings.getGroupByBank();
-    plugin.prefs.showFileColumns = settings.getShowFileColumns();
-    plugin.prefs.hideDuplicates = settings.getHideDuplicates();
-    plugin.prefs.showTooltips = settings.getTooltipsEnabled();
-    plugin.prefs.auditionNote = settings.getAuditionNote();
-    plugin.prefs.auditionVelocity = settings.getAuditionVelocity();
-    plugin.prefs.auditionDurationMs = settings.getAuditionDurationMs();
-    lnf.setDark (plugin.prefs.darkTheme);
-    syncChromeColours();
-    sendLookAndFeelChange();
-    plugin.library.setBaseFolders (settings.getFolderPaths());
-    plugin.midi.setChannel (settings.getChannel());
-    plugin.midi.setSysexPacingMs (settings.getPacingMs());
-    plugin.midi.openInputByName (settings.getMidiIn());
-    plugin.midi.openOutputByName (settings.getMidiOut());
-    plugin.persistPreferences();
-    plugin.library.rescanAsync();
-    refreshLibraryView();
-    showLibraryMode();
 }
 
 void FmLibPlugAudioProcessorEditor::sendDeviceBuffer()
@@ -489,62 +704,79 @@ void FmLibPlugAudioProcessorEditor::saveDeviceBuffer()
 {
     if (plugin.deviceBuffer.empty())
     {
-        juce::AlertWindow::showMessageBoxAsync (juce::AlertWindow::InfoIcon, "Save", "Device buffer is empty.");
+        auto* aw = new juce::AlertWindow ("Save", "Device buffer is empty.", juce::AlertWindow::NoIcon);
+        fmlib::themeAlertWindow (*aw, lnf);
+        aw->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
+        aw->enterModalState (true, juce::ModalCallbackFunction::create ([aw] (int)
+        {
+            std::unique_ptr<juce::AlertWindow> cleanup (aw);
+            aw->setLookAndFeel (nullptr);
+        }));
         return;
     }
 
     const auto folders = plugin.library.getBaseFolders();
     if (folders.empty())
     {
-        juce::AlertWindow::showMessageBoxAsync (juce::AlertWindow::WarningIcon, "Save", "Add a library folder in Settings first.");
+        auto* aw = new juce::AlertWindow ("Save", "Add a library folder in Settings first.", juce::AlertWindow::NoIcon);
+        fmlib::themeAlertWindow (*aw, lnf);
+        aw->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
+        aw->enterModalState (true, juce::ModalCallbackFunction::create ([aw] (int)
+        {
+            std::unique_ptr<juce::AlertWindow> cleanup (aw);
+            aw->setLookAndFeel (nullptr);
+        }));
         return;
     }
 
-    auto* aw = new juce::AlertWindow ("Save received presets", "File name (without .syx):", juce::AlertWindow::QuestionIcon);
+    const juce::File startDir (juce::String::fromUTF8 (folders.front().string().c_str()));
+
+    auto* aw = new juce::AlertWindow ("Save received presets", "File name (without .syx):", juce::AlertWindow::NoIcon);
     fmlib::themeAlertWindow (*aw, lnf);
     aw->addTextEditor ("name", "ReceivedBank", "Name");
-    aw->addComboBox ("folder", {}, "Destination folder");
-    auto* box = aw->getComboBoxComponent ("folder");
-    for (const auto& f : folders)
-        box->addItem (juce::String::fromUTF8 (f.string().c_str()), box->getNumItems() + 1);
-    box->setSelectedItemIndex (0);
     aw->addButton ("Save", 1, juce::KeyPress (juce::KeyPress::returnKey));
     aw->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
-    aw->enterModalState (true, juce::ModalCallbackFunction::create ([this, aw] (int result)
+    aw->enterModalState (true, juce::ModalCallbackFunction::create ([this, aw, startDir] (int result)
     {
         std::unique_ptr<juce::AlertWindow> cleanup (aw);
         aw->setLookAndFeel (nullptr);
         if (result != 1)
             return;
+
         const auto name = aw->getTextEditorContents ("name").toStdString();
-        const int idx = aw->getComboBoxComponent ("folder")->getSelectedItemIndex();
-        const auto foldersNow = plugin.library.getBaseFolders();
-        if (! juce::isPositiveAndBelow (idx, static_cast<int> (foldersNow.size())))
-            return;
-        const auto dest = foldersNow[static_cast<size_t> (idx)];
+        auto chooser = std::make_shared<juce::FileChooser> ("Choose destination folder", startDir);
+        chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories,
+                              [this, chooser, name] (const juce::FileChooser& fc)
+                              {
+                                  const auto destFile = fc.getResult();
+                                  if (! destFile.isDirectory())
+                                      return;
 
-        fmlib::PatchWriter::WriteResult wr;
-        const bool overwrite = true;
-        if (plugin.deviceBuffer.isFullBank())
-        {
-            auto bank = *plugin.deviceBuffer.asBank();
-            wr = fmlib::PatchWriter::writeBank (dest, name, bank, plugin.midi.getChannel(), overwrite);
-        }
-        else
-        {
-            wr = fmlib::PatchWriter::writeSingleVoice (dest, name, plugin.deviceBuffer.getVoices().front().voice,
-                                                       plugin.midi.getChannel(), overwrite);
-        }
+                                  const std::filesystem::path dest (destFile.getFullPathName().toStdString());
+                                  fmlib::PatchWriter::WriteResult wr;
+                                  constexpr bool overwrite = true;
+                                  if (plugin.deviceBuffer.isFullBank())
+                                  {
+                                      auto bank = *plugin.deviceBuffer.asBank();
+                                      wr = fmlib::PatchWriter::writeBank (dest, name, bank, plugin.midi.getChannel(), overwrite);
+                                  }
+                                  else
+                                  {
+                                      wr = fmlib::PatchWriter::writeSingleVoice (dest, name,
+                                                                                plugin.deviceBuffer.getVoices().front().voice,
+                                                                                plugin.midi.getChannel(), overwrite);
+                                  }
 
-        if (wr.ok)
-        {
-            plugin.deviceBuffer.markSaved();
-            plugin.library.rescanAsync();
-            setMidiStatus ("Saved " + juce::String::fromUTF8 (wr.path.string().c_str()));
-        }
-        else
-        {
-            setMidiStatus ("Save failed: " + juce::String::fromUTF8 (wr.error.c_str()));
-        }
+                                  if (wr.ok)
+                                  {
+                                      plugin.deviceBuffer.markSaved();
+                                      plugin.library.rescanAsync();
+                                      setMidiStatus ("Saved " + juce::String::fromUTF8 (wr.path.string().c_str()));
+                                  }
+                                  else
+                                  {
+                                      setMidiStatus ("Save failed: " + juce::String::fromUTF8 (wr.error.c_str()));
+                                  }
+                              });
     }));
 }

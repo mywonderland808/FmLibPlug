@@ -18,6 +18,12 @@ public:
 
     /** Dump request for 1 voice or bank. channel 1..16 */
     static std::vector<uint8_t> makeDumpRequest (bool bank32, int channel);
+
+    /**
+     * DX7 voice parameter change (edit buffer). paramIndex 0..154 matches VoiceData indices.
+     * channel 1..16.
+     */
+    static std::vector<uint8_t> makeParameterChange (int paramIndex, uint8_t value, int channel);
 };
 
 } // namespace fmlib

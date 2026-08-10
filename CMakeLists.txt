@@ -1,7 +1,7 @@
 # FmLibPlug
 cmake_minimum_required(VERSION 3.22)
 
-project(FmLibPlug VERSION 1.1.0)
+project(FmLibPlug VERSION 1.2.0)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -78,7 +78,9 @@ target_sources(FmLibPlug
     Source/sysex/SysexMessages.cpp
     Source/sysex/FormatDetect.cpp
     Source/sysex/VoiceMorpher.cpp
+    Source/sysex/MorphLocks.cpp
     Source/midi/MidiDeviceManager.cpp
+    Source/midi/MorphTransport.cpp
     Source/ui/PatchBrowser.cpp
     Source/ui/DeviceBufferPanel.cpp
     Source/ui/SettingsPanel.cpp
@@ -209,12 +211,15 @@ if(FMLIBPLUG_BUILD_TESTS)
     Tests/unit/AutoTagDupeTests.cpp
     Tests/unit/RecentFilterTests.cpp
     Tests/unit/VoiceMorpherTests.cpp
+    Tests/unit/MorphTransportTests.cpp
     Tests/unit/MorphPresetStoreTests.cpp
     Source/sysex/Dx7Formats.cpp
     Source/sysex/SysexParser.cpp
     Source/sysex/SysexMessages.cpp
     Source/sysex/FormatDetect.cpp
     Source/sysex/VoiceMorpher.cpp
+    Source/sysex/MorphLocks.cpp
+    Source/midi/MorphTransport.cpp
     Source/library/FolderScanner.cpp
     Source/library/PatchWriter.cpp
     Source/library/FavoritesStore.cpp
@@ -267,6 +272,7 @@ if(FMLIBPLUG_BUILD_TESTS)
   add_executable(FmLibPlugHwMidiTest
     Tools/HwMidiTest.cpp
     Source/midi/MidiDeviceManager.cpp
+    Source/midi/MorphTransport.cpp
     Source/sysex/Dx7Formats.cpp
     Source/sysex/SysexParser.cpp
     Source/sysex/SysexMessages.cpp

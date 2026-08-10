@@ -330,6 +330,58 @@ int main (int argc, char** argv)
         std::cout << "SKIP: bank overwrite (set allowBankWrite in local config or FMLIBPLUG_HW_ALLOW_BANK_WRITE=1)\n";
     }
 
+    // Opt-in morph pacing probe: hold a note, stream coarse-freq param changes, verify edit buffer.
+    if (envBool01 ("FMLIBPLUG_HW_MORPH_PROBE").value_or (false))
+    {
+        std::cout << "Morph probe: sending paced coarse-frequency param changes while a note sounds...\n";
+        auto voice = makeTestVoice (7);
+        voice[18] = 1;
+        if (! midi.sendVoice (voice))
+            return fail ("morph probe sendVoice failed");
+        std::this_thread::sleep_for (std::chrono::milliseconds (100));
+        midi.sendNoteOn (60, 100);
+        const int spacings[] = { 20, 10, 5, 3 };
+        int best = -1;
+        for (int spacing : spacings)
+        {
+            for (int step = 0; step < 8; ++step)
+            {
+                const auto msg = fmlib::SysexMessages::makeParameterChange (18, static_cast<uint8_t> (2 + step), cfg.channel);
+                if (! midi.sendRaw (msg, false))
+                    return fail ("morph probe param send failed");
+                std::this_thread::sleep_for (std::chrono::milliseconds (spacing));
+            }
+            clearDump (dump);
+            std::this_thread::sleep_for (std::chrono::milliseconds (50));
+            midi.sendNoteOff (60);
+            std::this_thread::sleep_for (std::chrono::milliseconds (100));
+            if (! midi.requestDump (false))
+                return fail ("morph probe dump request failed");
+            if (! waitForVoices (dump, 1, 5000, parsed))
+                return fail ("morph probe dump timeout");
+            if (parsed.voices.empty() || parsed.voices.front().data[18] != 9)
+            {
+                std::cout << "WARN: morph probe lost updates at spacing " << spacing << " ms\n";
+                break;
+            }
+            best = spacing;
+            std::cout << "OK: morph probe held at spacing " << spacing << " ms\n";
+            midi.sendNoteOn (60, 100);
+            voice[18] = 1;
+            midi.sendVoice (voice);
+            std::this_thread::sleep_for (std::chrono::milliseconds (80));
+        }
+        midi.sendNoteOff (60);
+        if (best < 0)
+            std::cout << "WARN: morph probe did not find a safe spacing\n";
+        else
+            std::cout << "Morph probe fastest safe spacing: " << best << " ms\n";
+    }
+    else
+    {
+        std::cout << "SKIP: morph probe (set FMLIBPLUG_HW_MORPH_PROBE=1)\n";
+    }
+
     midi.close();
     std::cout << "All enabled hardware tests passed.\n";
     return 0;

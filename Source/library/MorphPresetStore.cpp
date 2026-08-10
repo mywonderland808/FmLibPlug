@@ -68,6 +68,9 @@ void MorphPresetStore::loadFromFile (const juce::File& file)
                 p.name = c->getStringAttribute ("name").toStdString();
                 p.posX = (float) c->getDoubleAttribute ("posX", 0.0);
                 p.posY = (float) c->getDoubleAttribute ("posY", 0.0);
+                p.lockGroups = migrateMorphLockGroups ((uint32_t) c->getIntAttribute ("lockGroups", 0), 1);
+                p.lockRefX = (float) c->getDoubleAttribute ("lockRefX", 0.0);
+                p.lockRefY = (float) c->getDoubleAttribute ("lockRefY", 0.0);
                 readVoice (*c, "a", p.a, p.nameA);
                 readVoice (*c, "b", p.b, p.nameB);
                 readVoice (*c, "c", p.c, p.nameC);
@@ -88,6 +91,9 @@ void MorphPresetStore::saveToFile (const juce::File& file) const
         el->setAttribute ("name", juce::String::fromUTF8 (p.name.c_str()));
         el->setAttribute ("posX", (double) p.posX);
         el->setAttribute ("posY", (double) p.posY);
+        el->setAttribute ("lockGroups", (int) p.lockGroups);
+        el->setAttribute ("lockRefX", (double) p.lockRefX);
+        el->setAttribute ("lockRefY", (double) p.lockRefY);
         writeVoice (*el, "a", p.a, p.nameA);
         writeVoice (*el, "b", p.b, p.nameB);
         writeVoice (*el, "c", p.c, p.nameC);

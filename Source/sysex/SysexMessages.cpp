@@ -63,4 +63,19 @@ std::vector<uint8_t> SysexMessages::makeDumpRequest (bool bank32, int channel)
     };
 }
 
+std::vector<uint8_t> SysexMessages::makeParameterChange (int paramIndex, uint8_t value, int channel)
+{
+    const int p = (paramIndex < 0 ? 0 : (paramIndex > 154 ? 154 : paramIndex));
+    const uint8_t groupHigh = (p >= 128) ? 0x01 : 0x00;
+    return {
+        0xf0,
+        kYamahaId,
+        static_cast<uint8_t> (0x10 | channelNibble (channel)),
+        groupHigh,
+        static_cast<uint8_t> (p & 0x7f),
+        static_cast<uint8_t> (value & 0x7f),
+        0xf7
+    };
+}
+
 } // namespace fmlib

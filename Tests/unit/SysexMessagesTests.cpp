@@ -2,6 +2,7 @@
 #include "sysex/SysexMessages.h"
 #include "sysex/SysexParser.h"
 #include <array>
+#include <optional>
 
 using namespace fmlib;
 
@@ -60,4 +61,23 @@ TEST_CASE ("makeDumpRequest shape and channel clamp", "[sysex][messages]")
     REQUIRE (clampedLo[2] == 0x20);
     const auto clampedHi = SysexMessages::makeDumpRequest (false, 99);
     REQUIRE (clampedHi[2] == 0x2f);
+}
+
+TEST_CASE ("makeParameterChange layout for low and high params", "[sysex][messages][morph]")
+{
+    const auto low = SysexMessages::makeParameterChange (17, 0x40, 1);
+    REQUIRE (low.size() == 7);
+    REQUIRE (low[0] == 0xf0);
+    REQUIRE (low[1] == kYamahaId);
+    REQUIRE (low[2] == 0x10);
+    REQUIRE (low[3] == 0x00);
+    REQUIRE (low[4] == 17);
+    REQUIRE (low[5] == 0x40);
+    REQUIRE (low[6] == 0xf7);
+
+    const auto high = SysexMessages::makeParameterChange (145, 0x41, 16);
+    REQUIRE (high[2] == 0x1f);
+    REQUIRE (high[3] == 0x01);
+    REQUIRE (high[4] == (145 & 0x7f));
+    REQUIRE (high[5] == 0x41);
 }

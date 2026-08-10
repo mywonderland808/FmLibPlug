@@ -15,6 +15,9 @@ TEST_CASE ("MorphPresetStore add remove replace and file round-trip", "[library]
     p.nameB = "B";
     p.posX = 0.25f;
     p.posY = 0.75f;
+    p.lockGroups = morphLockEg | morphLockFreq;
+    p.lockRefX = 0.4f;
+    p.lockRefY = 0.6f;
     store.add (p);
     REQUIRE (store.items().size() == 1);
     REQUIRE (store.items()[0].a[0] == 10);
@@ -39,6 +42,9 @@ TEST_CASE ("MorphPresetStore add remove replace and file round-trip", "[library]
     REQUIRE (loaded.items()[0].a[0] == 99);
     REQUIRE (loaded.items()[0].posX == Catch::Approx (0.25f));
     REQUIRE (loaded.items()[0].nameA == "A");
+    REQUIRE (loaded.items()[0].lockGroups == (morphLockEg | morphLockFreq));
+    REQUIRE (loaded.items()[0].lockRefX == Catch::Approx (0.4f));
+    REQUIRE (loaded.items()[0].lockRefY == Catch::Approx (0.6f));
 
     loaded.removeAt (0);
     REQUIRE (loaded.items().empty());
