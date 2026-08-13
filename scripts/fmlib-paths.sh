@@ -11,24 +11,30 @@ fmlib_detect_os() {
   esac
 }
 
+# GNU coreutils `stat -f` is --file-system (not BSD -f format). Detect GNU via --version.
+fmlib_stat_is_gnu() {
+  stat --version >/dev/null 2>&1
+}
+
 # Epoch seconds (portable BSD/GNU).
 fmlib_mtime() {
   local f="$1"
   if [ ! -e "$f" ]; then echo 0; return; fi
-  if stat -f '%m' "$f" >/dev/null 2>&1; then
-    stat -f '%m' "$f"
-  else
+  if fmlib_stat_is_gnu; then
     stat -c '%Y' "$f"
+  else
+    stat -f '%m' "$f"
   fi
 }
 
 fmlib_mtime_human() {
   local f="$1"
   if [ ! -e "$f" ]; then echo none; return; fi
-  if stat -f '%Sm' -t '%Y-%m-%d %H:%M:%S' "$f" >/dev/null 2>&1; then
-    stat -f '%Sm' -t '%Y-%m-%d %H:%M:%S' "$f"
+  if fmlib_stat_is_gnu; then
+    # GNU %y is "YYYY-MM-DD HH:MM:SS.ns TZ"; strip fractional seconds / zone.
+    stat -c '%y' "$f" | cut -d. -f1
   else
-    stat -c '%Y-%m-%d %H:%M:%S' "$f"
+    stat -f '%Sm' -t '%Y-%m-%d %H:%M:%S' "$f"
   fi
 }
 
@@ -45,10 +51,15 @@ fmlib_shared_lib() {
 }
 
 # Print first existing non-empty binary under a plugin/standalone product root.
+# On Linux/Windows, CLAP is a single ELF/PE file named FmLibPlug.clap (not a bundle).
 fmlib_find_binary() {
   local root="$1"
   local cand
   if [ ! -e "$root" ]; then return 1; fi
+  if [ -f "$root" ] && [ -s "$root" ]; then
+    echo "$root"
+    return 0
+  fi
   for cand in \
     "$root/Contents/MacOS/FmLibPlug" \
     "$root/Contents/x86_64-linux/FmLibPlug.so" \
@@ -58,6 +69,7 @@ fmlib_find_binary() {
     "$root/Contents/arm64-win/FmLibPlug.vst3" \
     "$root/libFmLibPlug.so" \
     "$root/FmLibPlug.so" \
+    "$root/FmLibPlug.clap" \
     "$root/FmLibPlug.dll" \
     "$root/FmLibPlug" \
     "$root/FmLibPlug.exe"; do
@@ -71,6 +83,7 @@ fmlib_find_binary() {
   found="$(find "$root" -type f \( \
       -name 'FmLibPlug' -o -name 'FmLibPlug.exe' -o -name 'FmLibPlug.so' \
       -o -name 'FmLibPlug.dll' -o -name 'libFmLibPlug.so' -o -name 'FmLibPlug.vst3' \
+      -o -name 'FmLibPlug.clap' \
     \) 2>/dev/null | LC_ALL=C sort | head -1)"
   if [ -n "$found" ] && [ -s "$found" ]; then
     echo "$found"

@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Linux/Windows CLAP verification: `fmlib_find_binary` treats a single `FmLibPlug.clap` file as the plugin binary (not only macOS bundles)
+
 ## [1.2.0] - 2026-08-11
 
 ### Added
