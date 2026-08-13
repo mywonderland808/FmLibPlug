@@ -128,6 +128,9 @@ ensure-configure:
 			-DFMLIBPLUG_BUILD_CLAP=ON >/dev/null; \
 	fi
 
+# Wipe format products so cmake relinks against a fresh SharedCode archive.
+# Recreate nested VST3/LV2 output dirs afterwards: Unix Makefiles do not mkdir
+# them before ld, so Linux otherwise fails with "cannot open output file".
 force-relink-clean:
 	@if [ "$(FORCE_RELINK)" = "1" ]; then \
 		echo "Removing format products to force relink against SharedCode..."; \
@@ -138,6 +141,15 @@ force-relink-clean:
 			"$(ARTEFACT_ROOT)/AU/FmLibPlug.component" \
 			"$(ARTEFACT_ROOT)/LV2/FmLibPlug.lv2" \
 			"$(ARTEFACT_ROOT)/CLAP/FmLibPlug.clap"; \
+		mkdir -p \
+			"$(ARTEFACT_ROOT)/Standalone" \
+			"$(ARTEFACT_ROOT)/CLAP" \
+			"$(ARTEFACT_ROOT)/LV2/FmLibPlug.lv2" \
+			"$(ARTEFACT_ROOT)/VST3/FmLibPlug.vst3/Contents/x86_64-linux" \
+			"$(ARTEFACT_ROOT)/VST3/FmLibPlug.vst3/Contents/aarch64-linux" \
+			"$(ARTEFACT_ROOT)/VST3/FmLibPlug.vst3/Contents/arm64-linux" \
+			"$(ARTEFACT_ROOT)/VST3/FmLibPlug.vst3/Contents/x86_64-win" \
+			"$(ARTEFACT_ROOT)/VST3/FmLibPlug.vst3/Contents/arm64-win"; \
 	fi
 
 write-stamp:
