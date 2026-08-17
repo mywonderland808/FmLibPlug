@@ -72,9 +72,10 @@ public:
     bool sendVoice (const VoiceData& voice, bool pace = true);
     /**
      * Queue a morph target. forceCommit: full dump preferred when idle (click / drag-end / jump).
+     * liveAllParams: stream non-freq changes while notes are held (lock-reference).
      * Transport ticks flush under the active stream mode + byte budget.
      */
-    bool sendMorphVoice (const VoiceData& voice, bool forceCommit = false);
+    bool sendMorphVoice (const VoiceData& voice, bool forceCommit = false, bool liveAllParams = false);
     void invalidateMorphBaseline();
     bool sendBank (const std::array<VoiceData, kBankVoiceCount>& bank);
     bool requestDump (bool bank32);

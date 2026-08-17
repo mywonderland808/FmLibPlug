@@ -353,7 +353,7 @@ void MidiDeviceManager::invalidateMorphBaseline()
         ensureMorphTimer();
 }
 
-bool MidiDeviceManager::sendMorphVoice (const VoiceData& voice, bool forceCommit)
+bool MidiDeviceManager::sendMorphVoice (const VoiceData& voice, bool forceCommit, bool liveAllParams)
 {
     if (output == nullptr)
     {
@@ -363,7 +363,7 @@ bool MidiDeviceManager::sendMorphVoice (const VoiceData& voice, bool forceCommit
 
     updateNotesSounding ((notesSoundingFn ? notesSoundingFn() : false) || hasThruNotesSounding());
 
-    morph.setTarget (voice, forceCommit);
+    morph.setTarget (voice, forceCommit, liveAllParams);
     ensureMorphTimer();
 
     // Eager tick so idle commits feel immediate (no-op while the wire is busy).

@@ -55,8 +55,11 @@ public:
     /**
      * Update morph target. Coalesces: only the latest voice is kept.
      * forceCommit: prefer a full dump when idle (pad click / drag end / note jump).
+     * liveAllParams: while notes are held, stream every changed parameter even in freqOnly
+     * (lock-reference / lock-chip edits). Clears once non-freq diffs have caught up so
+     * later LFO/pad ticks return to freqOnly even if pitch is still moving.
      */
-    void setTarget (const VoiceData& voice, bool forceCommit = false);
+    void setTarget (const VoiceData& voice, bool forceCommit = false, bool liveAllParams = false);
 
     void invalidateBaseline();
     /** Mark voice as already on the wire (after sendVoice / external dump). */
@@ -85,12 +88,14 @@ public:
 
 private:
     void applyEmittedToBaseline (const MorphTransportTickResult& slice, bool liveFreqOnly);
+    int pendingNonFreqDiffCount() const;
 
     MorphStreamMode streamMode = MorphStreamMode::freqOnly;
     int channel = 1;
     int byteBudget = kDefaultByteBudget;
     bool notesSounding = false;
     bool forceCommitPending = false;
+    bool liveAllParamsPending = false;
 
     std::optional<VoiceData> target;
     std::optional<VoiceData> lastSent;

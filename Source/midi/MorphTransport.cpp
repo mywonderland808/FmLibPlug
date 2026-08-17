@@ -33,6 +33,19 @@ int countWireDiffs (const VoiceData& a, const VoiceData& b)
     }
     return n;
 }
+
+int countNonFreqWireDiffs (const VoiceData& a, const VoiceData& b)
+{
+    int n = 0;
+    for (size_t i = 0; i < a.size(); ++i)
+    {
+        if (isNameByte (i) || isFreqLiveIndex (i))
+            continue;
+        if (a[i] != b[i])
+            ++n;
+    }
+    return n;
+}
 } // namespace
 
 bool MorphTransport::isLiveFreqIndex (size_t voiceIndex)
@@ -55,17 +68,20 @@ void MorphTransport::setNotesSounding (bool sounding)
     notesSounding = sounding;
 }
 
-void MorphTransport::setTarget (const VoiceData& voice, bool forceCommit)
+void MorphTransport::setTarget (const VoiceData& voice, bool forceCommit, bool liveAllParams)
 {
     target = voice;
     if (forceCommit)
         forceCommitPending = true;
+    if (liveAllParams)
+        liveAllParamsPending = true;
 }
 
 void MorphTransport::invalidateBaseline()
 {
     lastSent.reset();
     forceCommitPending = true;
+    liveAllParamsPending = false;
 }
 
 void MorphTransport::forceBaseline (const VoiceData& voice)
@@ -73,6 +89,7 @@ void MorphTransport::forceBaseline (const VoiceData& voice)
     lastSent = voice;
     target = voice;
     forceCommitPending = false;
+    liveAllParamsPending = false;
 }
 
 int MorphTransport::pendingDiffCount() const
@@ -82,6 +99,13 @@ int MorphTransport::pendingDiffCount() const
     if (! lastSent.has_value())
         return kVoiceDataBytes;
     return countWireDiffs (*lastSent, *target);
+}
+
+int MorphTransport::pendingNonFreqDiffCount() const
+{
+    if (! target.has_value() || ! lastSent.has_value())
+        return 0;
+    return countNonFreqWireDiffs (*lastSent, *target);
 }
 
 MorphTransportTickResult MorphTransport::buildSlice (const VoiceData& from,
@@ -164,7 +188,8 @@ MorphTransportTickResult MorphTransport::tick()
         return out;
 
     const bool idle = ! notesSounding;
-    const bool liveFreqOnly = notesSounding && streamMode == MorphStreamMode::freqOnly;
+    const bool liveFreqOnly = notesSounding && streamMode == MorphStreamMode::freqOnly
+                              && ! liveAllParamsPending;
 
     // Establish a baseline even while sounding (needed before freq-only param streaming).
     if (! lastSent.has_value())
@@ -174,22 +199,28 @@ MorphTransportTickResult MorphTransport::tick()
         out.paramsEmitted = kVoiceDataBytes;
         lastSent = *target;
         forceCommitPending = false;
+        liveAllParamsPending = false;
         return out;
     }
 
     const bool preferDump = forceCommitPending && idle;
-    out = buildSlice (*lastSent, *target, channel, byteBudget, notesSounding, streamMode, preferDump);
+    const auto sliceMode = liveAllParamsPending ? MorphStreamMode::allParams : streamMode;
+    out = buildSlice (*lastSent, *target, channel, byteBudget, notesSounding, sliceMode, preferDump);
 
     if (out.messages.empty())
     {
         if (pendingDiffCount() == 0)
             forceCommitPending = false;
+        if (pendingNonFreqDiffCount() == 0)
+            liveAllParamsPending = false;
         return out;
     }
 
     applyEmittedToBaseline (out, liveFreqOnly);
     if (out.usedFullDump || pendingDiffCount() == 0)
         forceCommitPending = false;
+    if (out.usedFullDump || pendingNonFreqDiffCount() == 0)
+        liveAllParamsPending = false;
 
     return out;
 }

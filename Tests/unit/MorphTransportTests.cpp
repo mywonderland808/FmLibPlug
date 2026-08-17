@@ -71,6 +71,75 @@ TEST_CASE ("MorphTransport allParams streams non-freq changes while sounding", "
     REQUIRE (slice.messages.front()[4] == 16);
 }
 
+TEST_CASE ("MorphTransport liveAllParams streams non-freq while freqOnly and sounding", "[midi][morph][transport]")
+{
+    MorphTransport t;
+    t.setStreamMode (MorphStreamMode::freqOnly);
+    t.setChannel (1);
+    t.setByteBudget (70);
+
+    VoiceData a = blankVoice();
+    VoiceData b = blankVoice();
+    a[16] = 40;
+    b[16] = 90; // operator level: held in freqOnly unless liveAllParams
+
+    t.forceBaseline (a);
+    t.setNotesSounding (true);
+    t.setTarget (b, true, true);
+
+    auto slice = t.tick();
+    REQUIRE (slice.paramsEmitted == 1);
+    REQUIRE_FALSE (slice.usedFullDump);
+    REQUIRE (slice.messages.front()[4] == 16);
+
+    VoiceData c = b;
+    c[16] = 50;
+    t.setTarget (c, false, false);
+    auto held = t.tick();
+    REQUIRE (held.messages.empty());
+}
+
+TEST_CASE ("MorphTransport liveAllParams returns to freqOnly after non-freq catch-up", "[midi][morph][transport]")
+{
+    MorphTransport t;
+    t.setStreamMode (MorphStreamMode::freqOnly);
+    t.setChannel (1);
+    t.setByteBudget (7); // one param-change per tick
+
+    VoiceData a = blankVoice();
+    VoiceData b = blankVoice();
+    a[16] = 40;
+    b[16] = 90; // op1 level (non-freq), before coarse at 18
+    a[17] = 0;
+    b[17] = 1; // osc mode (non-freq)
+
+    t.forceBaseline (a);
+    t.setNotesSounding (true);
+    t.setTarget (b, true, true);
+
+    auto first = t.tick();
+    REQUIRE (first.paramsEmitted == 1);
+    REQUIRE (first.messages.front()[4] == 16);
+
+    // LFO moves pitch while the second non-freq param is still in flight.
+    VoiceData moving = b;
+    moving[18] = 10; // coarse
+    t.setTarget (moving, false, false);
+    auto second = t.tick();
+    REQUIRE (second.paramsEmitted == 1);
+    REQUIRE (second.messages.front()[4] == 17);
+
+    // Non-freq is caught up; a later level edit must wait, pitch still streams.
+    VoiceData later = moving;
+    later[16] = 50;
+    later[18] = 12;
+    t.setTarget (later, false, false);
+    auto third = t.tick();
+    REQUIRE (third.paramsEmitted == 1);
+    REQUIRE (third.messages.front()[4] == 18);
+    REQUIRE_FALSE (third.usedFullDump);
+}
+
 TEST_CASE ("MorphTransport freqOnly needs a baseline before streaming", "[midi][morph][transport]")
 {
     MorphTransport t;
