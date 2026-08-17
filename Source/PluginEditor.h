@@ -6,11 +6,13 @@
 #include "ui/MorpherPanel.h"
 #include "ui/PatchBrowser.h"
 #include "ui/SettingsPanel.h"
+#include "util/AuditionHoldInputs.h"
 #include <set>
 
 class FmLibPlugAudioProcessorEditor : public juce::AudioProcessorEditor,
                                       public juce::DragAndDropContainer,
-                                      private juce::Timer
+                                      private juce::Timer,
+                                      private juce::KeyListener
 {
 public:
     explicit FmLibPlugAudioProcessorEditor (FmLibPlugAudioProcessor&);
@@ -18,8 +20,12 @@ public:
 
     void paint (juce::Graphics&) override;
     void resized() override;
+    bool keyPressed (const juce::KeyPress& key) override;
+    bool keyStateChanged (bool isKeyDown) override;
 
 private:
+    bool keyPressed (const juce::KeyPress& key, juce::Component*) override;
+    bool keyStateChanged (bool isKeyDown, juce::Component*) override;
     void timerCallback() override;
     void dragOperationEnded (const juce::DragAndDropTarget::SourceDetails&) override;
     void refreshLibraryView();
@@ -32,16 +38,27 @@ private:
     void showMorphMode();
     void restoreListFocus();
     void syncAuditionPrefsFromSettings();
-    void syncMorphPrefsFromSettings();
+    void syncMorphPrefsFromSettings (bool persist);
     int morphNoteLeadMs() const;
     void prepareNextMorphJump();
-    void syncMidiParamsFromSettings();
+    void syncMidiParamsFromSettings (bool persist);
     void applyMidiPortsFromSettings();
     void syncFoldersFromSettings();
     void syncTooltipsFromSettings();
     void updateStatusBar();
     void setMidiStatus (const juce::String& s);
     void syncTooltipWindow();
+    void endMorphPerformance();
+    void pauseMorphPerformance();
+    void resumeMorphPerformance();
+    void handleLibraryVoiceLoad (const fmlib::PatchEntry& e, bool loadBank);
+    void handleMenuAudition (const fmlib::PatchEntry& e);
+    void assignMorphCorner (int corner0to3, const fmlib::PatchEntry& e);
+    void startAuditionHold();
+    void stopAuditionHold();
+    void applyAuditionHoldAction (fmlib::AuditionHoldInputs::Action action);
+    void syncAuditionButtonVisual();
+    int previewNoteLeadMs() const;
 
     FmLibPlugAudioProcessor& plugin;
     fmlib::LookAndFeel_FmLibPlug lnf;
@@ -65,6 +82,9 @@ private:
     juce::String lastMidiStatus;
     fmlib::BrowserStats browserStats;
     std::set<int> controllerHeldNotes;
+    fmlib::AuditionHoldInputs auditionHoldInputs;
+    bool ignoreAuditionButtonState = false;
+    bool morphPaused = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (FmLibPlugAudioProcessorEditor)
 };

@@ -68,7 +68,7 @@ std::vector<BrowserRow> BrowserList::buildRows (std::vector<PatchEntry> voices, 
 }
 
 BrowserFilterResult BrowserList::filterForBrowser (const std::vector<PatchEntry>& all,
-                                                   bool bankFileView,
+                                                   BrowserScope scope,
                                                    const LibraryFilterQuery& query,
                                                    const FavoritesStore& favorites,
                                                    const TagStore* tags,
@@ -78,14 +78,19 @@ BrowserFilterResult BrowserList::filterForBrowser (const std::vector<PatchEntry>
     scoped.reserve (all.size());
     for (const auto& e : all)
     {
-        if (bankFileView)
+        switch (scope)
         {
-            if (isBankFileVoice (e))
+            case BrowserScope::bankFiles:
+                if (isBankFileVoice (e))
+                    scoped.push_back (e);
+                break;
+            case BrowserScope::allVoices:
                 scoped.push_back (e);
-        }
-        else if (! isBankFileVoice (e))
-        {
-            scoped.push_back (e);
+                break;
+            case BrowserScope::singleSysex:
+                if (! isBankFileVoice (e))
+                    scoped.push_back (e);
+                break;
         }
     }
 
@@ -195,6 +200,127 @@ std::optional<int> BrowserList::nextBankRow (const std::vector<BrowserRow>& rows
         {
             return findBankStart (rows, i);
         }
+    }
+    return std::nullopt;
+}
+
+namespace
+{
+bool asciiIsAlnum (unsigned char c)
+{
+    return (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
+}
+
+char asciiToLower (unsigned char c)
+{
+    if (c >= 'A' && c <= 'Z')
+        return static_cast<char> (c - 'A' + 'a');
+    return static_cast<char> (c);
+}
+} // namespace
+
+std::string BrowserList::nameBrowseKey (const std::string& voiceName)
+{
+    std::string out;
+    out.reserve (voiceName.size());
+    bool started = false;
+    for (const char ch : voiceName)
+    {
+        const auto c = static_cast<unsigned char> (ch);
+        if (! started)
+        {
+            if (! asciiIsAlnum (c))
+                continue;
+            started = true;
+        }
+        out.push_back (asciiToLower (c));
+    }
+    return out;
+}
+
+char BrowserList::nameGroupKey (const std::string& voiceName)
+{
+    const auto key = nameBrowseKey (voiceName);
+    if (key.empty())
+        return '#';
+    const unsigned char c = static_cast<unsigned char> (key.front());
+    if (c >= 'a' && c <= 'z')
+        return static_cast<char> (c - 'a' + 'A');
+    return '#';
+}
+
+std::string BrowserList::nameSortKey (const std::string& voiceName)
+{
+    if (nameGroupKey (voiceName) != '#')
+        return nameBrowseKey (voiceName);
+
+    // Digits, symbols and empty names share one bucket, sorted before A.
+    std::string rest;
+    rest.reserve (voiceName.size() + 1);
+    rest.push_back ('\x01');
+    for (const char ch : voiceName)
+    {
+        const auto c = static_cast<unsigned char> (ch);
+        rest.push_back (asciiToLower (c));
+    }
+    return rest;
+}
+
+std::optional<int> BrowserList::prevNameGroupRow (const std::vector<BrowserRow>& rows, int selectedRow)
+{
+    int cur = selectedRow;
+    if (cur < 0 || cur >= static_cast<int> (rows.size()))
+        return std::nullopt;
+    if (rows[static_cast<size_t> (cur)].kind != BrowserRowKind::voice)
+    {
+        // Snap to nearest voice at/after selection.
+        while (cur < static_cast<int> (rows.size())
+               && rows[static_cast<size_t> (cur)].kind != BrowserRowKind::voice)
+            ++cur;
+        if (cur >= static_cast<int> (rows.size()))
+            return std::nullopt;
+    }
+
+    const char key = nameGroupKey (rows[static_cast<size_t> (cur)].entry.voiceName);
+    for (int i = cur - 1; i >= 0; --i)
+    {
+        if (rows[static_cast<size_t> (i)].kind != BrowserRowKind::voice)
+            continue;
+        if (nameGroupKey (rows[static_cast<size_t> (i)].entry.voiceName) == key)
+            continue;
+        const char target = nameGroupKey (rows[static_cast<size_t> (i)].entry.voiceName);
+        int start = i;
+        while (start > 0 && rows[static_cast<size_t> (start - 1)].kind == BrowserRowKind::voice
+               && nameGroupKey (rows[static_cast<size_t> (start - 1)].entry.voiceName) == target)
+            --start;
+        return start;
+    }
+    return std::nullopt;
+}
+
+std::optional<int> BrowserList::nextNameGroupRow (const std::vector<BrowserRow>& rows, int selectedRow)
+{
+    int cur = selectedRow;
+    if (cur < 0)
+        cur = 0;
+    if (cur >= static_cast<int> (rows.size()))
+        return std::nullopt;
+    if (rows[static_cast<size_t> (cur)].kind != BrowserRowKind::voice)
+    {
+        while (cur < static_cast<int> (rows.size())
+               && rows[static_cast<size_t> (cur)].kind != BrowserRowKind::voice)
+            ++cur;
+        if (cur >= static_cast<int> (rows.size()))
+            return std::nullopt;
+    }
+
+    const char key = nameGroupKey (rows[static_cast<size_t> (cur)].entry.voiceName);
+    for (int i = cur + 1; i < static_cast<int> (rows.size()); ++i)
+    {
+        if (rows[static_cast<size_t> (i)].kind != BrowserRowKind::voice)
+            continue;
+        if (nameGroupKey (rows[static_cast<size_t> (i)].entry.voiceName) != key)
+            return i;
     }
     return std::nullopt;
 }

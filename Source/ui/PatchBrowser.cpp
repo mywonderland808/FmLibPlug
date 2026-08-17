@@ -71,17 +71,18 @@ PatchBrowser::PatchBrowser()
     groupToggle.setClickingTogglesState (true);
     groupToggle.setToggleState (true, juce::dontSendNotification);
     groupToggle.setButtonText ("Bank");
-    groupToggle.setTooltip ("Bank = multi-voice bank files. Single = one-voice files only.");
     groupToggle.onClick = [this]
     {
         bankFileView = groupToggle.getToggleState();
-        groupToggle.setButtonText (bankFileView ? "Bank" : "Single");
+        updateListToggleUi();
+        applyDefaultSortForCurrentView();
         if (onBankFileViewChanged)
             onBankFileViewChanged (bankFileView);
         updateBankChrome();
         rebuildFiltered();
     };
     addAndMakeVisible (groupToggle);
+    updateListToggleUi();
 
     prevBank.onClick = [this] { jumpPrevBank(); };
     nextBank.onClick = [this] { jumpNextBank(); };
@@ -157,28 +158,49 @@ void PatchBrowser::rebuildColumns()
 
 void PatchBrowser::setBankFileView (bool banks)
 {
+    if (bankFileView == banks)
+    {
+        groupToggle.setToggleState (banks, juce::dontSendNotification);
+        updateListToggleUi();
+        return;
+    }
     bankFileView = banks;
     groupToggle.setToggleState (banks, juce::dontSendNotification);
-    groupToggle.setButtonText (banks ? "Bank" : "Single");
+    updateListToggleUi();
+    applyDefaultSortForCurrentView();
     updateBankChrome();
     rebuildFiltered();
 }
 
-void PatchBrowser::setGroupByBank (bool on)
+void PatchBrowser::setListViewContents (int mode)
 {
-    groupByBank = on;
-    updateBankChrome();
-    rebuildFiltered();
+    const int next = juce::jlimit (0, 1, mode);
+    if (listViewContents == next)
+    {
+        updateListToggleUi();
+        return;
+    }
+    listViewContents = next;
+    updateListToggleUi();
+    if (! bankFileView)
+    {
+        applyDefaultSortForCurrentView();
+        rebuildFiltered();
+    }
 }
 
 void PatchBrowser::setShowFileColumns (bool on)
 {
+    if (showFileColumns == on)
+        return;
     showFileColumns = on;
     rebuildColumns();
 }
 
 void PatchBrowser::setHideDuplicates (bool on)
 {
+    if (hideDuplicates == on)
+        return;
     hideDuplicates = on;
     rebuildFiltered();
 }
@@ -196,23 +218,89 @@ void PatchBrowser::setFavoritesOnly (bool on)
     rebuildFiltered();
 }
 
+void PatchBrowser::updateListToggleUi()
+{
+    if (bankFileView)
+    {
+        groupToggle.setButtonText ("Bank");
+        groupToggle.setTooltip (
+            "Bank view: voices from multi-voice bank files, always sorted and grouped by bank file name.");
+    }
+    else if (listViewContents == 0)
+    {
+        groupToggle.setButtonText ("All");
+        groupToggle.setTooltip (
+            "All view: every library preset in a flat list, including single-voice SysEx files and "
+            "voices from bank files. Switch to Bank for grouped bank files.");
+    }
+    else
+    {
+        groupToggle.setButtonText ("Single");
+        groupToggle.setTooltip (
+            "Single view: only single-voice SysEx files (not voices from bank dumps). "
+            "Change List contents in Settings to show All voices instead.");
+    }
+}
+
+BrowserScope PatchBrowser::currentScope() const
+{
+    if (bankFileView)
+        return BrowserScope::bankFiles;
+    return listViewContents == 0 ? BrowserScope::allVoices : BrowserScope::singleSysex;
+}
+
+void PatchBrowser::applyDefaultSortForCurrentView()
+{
+    // Bank: slot order. All and Single: Patch name (A-Z jump + browsing).
+    sortColumnId = bankFileView ? 5 : 2;
+    sortForwards = true;
+    table.getHeader().setSortColumnId (sortColumnId, sortForwards);
+}
+
 void PatchBrowser::updateBankChrome()
 {
-    // Keep layout stable: always reserve button slots; only toggle visibility.
-    prevBank.setVisible (bankFileView);
-    nextBank.setVisible (bankFileView);
-    stickyBank.setVisible (bankFileView && groupByBank);
+    stickyBank.setVisible (bankFileView);
+
+    if (bankFileView)
+    {
+        prevBank.setVisible (true);
+        nextBank.setVisible (true);
+        prevBank.setEnabled (true);
+        nextBank.setEnabled (true);
+        prevBank.setButtonText ("< Bank");
+        nextBank.setButtonText ("Bank >");
+        prevBank.setTooltip ("Previous bank. Keyboard: Left arrow.");
+        nextBank.setTooltip ("Next bank. Keyboard: Right arrow.");
+    }
+    else if (sortColumnId == 2) // Patch (name)
+    {
+        prevBank.setVisible (true);
+        nextBank.setVisible (true);
+        prevBank.setEnabled (true);
+        nextBank.setEnabled (true);
+        prevBank.setButtonText ("< A-Z");
+        nextBank.setButtonText ("A-Z >");
+        prevBank.setTooltip ("Previous name group. Keyboard: Left arrow. Letter groups A-Z; numbers and symbols share one group.");
+        nextBank.setTooltip ("Next name group. Keyboard: Right arrow. Letter groups A-Z; numbers and symbols share one group.");
+    }
+    else
+    {
+        // Name-group jump is only meaningful when the list is sorted by Patch name.
+        prevBank.setVisible (true);
+        nextBank.setVisible (true);
+        prevBank.setEnabled (false);
+        nextBank.setEnabled (false);
+        prevBank.setButtonText ("< A-Z");
+        nextBank.setButtonText ("A-Z >");
+        prevBank.setTooltip ("Sort by Patch name to jump A-Z groups. Keyboard: Left arrow.");
+        nextBank.setTooltip ("Sort by Patch name to jump A-Z groups. Keyboard: Right arrow.");
+    }
     resized();
 }
 
 void PatchBrowser::setEntries (std::vector<PatchEntry> entries, FavoritesStore* favorites, TagStore* tags,
                                RecentStore* recent)
 {
-    uint64_t previousId = 0;
-    if (lastSentRow >= 0 && lastSentRow < static_cast<int> (rows.size())
-        && rows[static_cast<size_t> (lastSentRow)].kind == BrowserRowKind::voice)
-        previousId = rows[static_cast<size_t> (lastSentRow)].entry.contentId;
-
     all = std::move (entries);
     for (auto& e : all)
         if (e.voiceNameLower.empty())
@@ -221,20 +309,6 @@ void PatchBrowser::setEntries (std::vector<PatchEntry> entries, FavoritesStore* 
     tagStore = tags;
     recentStore = recent;
     rebuildFiltered();
-
-    if (previousId != 0)
-    {
-        for (int i = 0; i < static_cast<int> (rows.size()); ++i)
-        {
-            if (rows[static_cast<size_t> (i)].kind == BrowserRowKind::voice
-                && rows[static_cast<size_t> (i)].entry.contentId == previousId)
-            {
-                lastSentRow = -1;
-                table.selectRow (i, false, false);
-                break;
-            }
-        }
-    }
     updateStickyHeader();
     refreshTagStrip();
 }
@@ -309,7 +383,7 @@ void PatchBrowser::resized()
     auto stickyArea = r.removeFromTop (24);
     r.removeFromTop (2);
     stickyBank.setBounds (stickyArea);
-    stickyBank.setVisible (bankFileView && groupByBank);
+    stickyBank.setVisible (bankFileView);
     table.setBounds (r);
 }
 
@@ -467,9 +541,7 @@ bool PatchBrowser::keyPressed (const juce::KeyPress& key)
     if (key.isKeyCode (juce::KeyPress::pageUpKey)
         || key.isKeyCode (juce::KeyPress::pageDownKey)
         || key.isKeyCode (juce::KeyPress::homeKey)
-        || key.isKeyCode (juce::KeyPress::endKey)
-        || key.isKeyCode (juce::KeyPress::leftKey)
-        || key.isKeyCode (juce::KeyPress::rightKey))
+        || key.isKeyCode (juce::KeyPress::endKey))
     {
         if (! table.hasKeyboardFocus (true))
             table.grabKeyboardFocus();
@@ -489,16 +561,8 @@ bool PatchBrowser::keyPressed (const juce::KeyPress& key)
         return handled;
     }
 
-    if (bankFileView && key.getTextCharacter() == '[')
-    {
-        jumpPrevBank();
+    if (handleJumpKey (key))
         return true;
-    }
-    if (bankFileView && key.getTextCharacter() == ']')
-    {
-        jumpNextBank();
-        return true;
-    }
 
     if (key.isKeyCode (juce::KeyPress::returnKey))
         return toggleFavoriteOnSelection();
@@ -512,19 +576,35 @@ bool PatchBrowser::keyPressed (const juce::KeyPress& key, juce::Component*)
         return moveSelectionBy (-1);
     if (key.isKeyCode (juce::KeyPress::downKey))
         return moveSelectionBy (1);
-    if (bankFileView && key.getTextCharacter() == '[')
+    if (handleJumpKey (key))
+        return true;
+    if (key.isKeyCode (juce::KeyPress::returnKey))
+        return toggleFavoriteOnSelection();
+    return false;
+}
+
+bool PatchBrowser::handleJumpKey (const juce::KeyPress& key)
+{
+    if (key.getModifiers().isAnyModifierKeyDown())
+        return false;
+    if (! jumpKeysEnabled())
+        return false;
+    if (key.isKeyCode (juce::KeyPress::leftKey))
     {
         jumpPrevBank();
         return true;
     }
-    if (bankFileView && key.getTextCharacter() == ']')
+    if (key.isKeyCode (juce::KeyPress::rightKey))
     {
         jumpNextBank();
         return true;
     }
-    if (key.isKeyCode (juce::KeyPress::returnKey))
-        return toggleFavoriteOnSelection();
     return false;
+}
+
+bool PatchBrowser::jumpKeysEnabled() const
+{
+    return bankFileView || sortColumnId == 2;
 }
 
 int PatchBrowser::selectedVoiceRow() const
@@ -543,15 +623,19 @@ bool PatchBrowser::toggleFavoriteOnSelection()
     if (row < 0 || ! onFav)
         return false;
     onFav (rows[static_cast<size_t> (row)].entry.contentId);
-    table.repaintRow (row);
+    if (favOnly.getToggleState())
+        rebuildFiltered();
+    else
+        table.repaintRow (row);
     return true;
 }
 
 void PatchBrowser::jumpPrevBank()
 {
-    if (! bankFileView)
+    if (! jumpKeysEnabled())
         return;
-    const auto next = BrowserList::prevBankRow (rows, table.getSelectedRow());
+    const auto next = bankFileView ? BrowserList::prevBankRow (rows, table.getSelectedRow())
+                                   : BrowserList::prevNameGroupRow (rows, table.getSelectedRow());
     if (next)
     {
         table.selectRow (*next, false, true);
@@ -561,9 +645,10 @@ void PatchBrowser::jumpPrevBank()
 
 void PatchBrowser::jumpNextBank()
 {
-    if (! bankFileView)
+    if (! jumpKeysEnabled())
         return;
-    const auto next = BrowserList::nextBankRow (rows, table.getSelectedRow());
+    const auto next = bankFileView ? BrowserList::nextBankRow (rows, table.getSelectedRow())
+                                   : BrowserList::nextNameGroupRow (rows, table.getSelectedRow());
     if (next)
     {
         table.selectRow (*next, false, true);
@@ -586,9 +671,10 @@ void PatchBrowser::timerCallback()
 
 int PatchBrowser::compareEntries (const PatchEntry& a, const PatchEntry& b) const
 {
-    auto nameOf = [] (const PatchEntry& e) -> const std::string&
+    auto nameOf = [] (const PatchEntry& e)
     {
-        return e.voiceNameLower.empty() ? e.voiceName : e.voiceNameLower;
+        // Same buckets as A-Z jumps: letters A-Z, everything else one group.
+        return BrowserList::nameSortKey (e.voiceName);
     };
     auto fileOf = [] (const PatchEntry& e) -> const std::string&
     {
@@ -744,11 +830,16 @@ void PatchBrowser::sortOrderChanged (int newSortColumnId, bool isForwards)
 {
     sortColumnId = newSortColumnId;
     sortForwards = isForwards;
+    updateBankChrome();
     rebuildFiltered();
 }
 
 void PatchBrowser::rebuildFiltered()
 {
+    std::optional<PatchEntry> keepSelected;
+    if (const int sel = selectedVoiceRow(); sel >= 0)
+        keepSelected = rows[static_cast<size_t> (sel)].entry;
+
     FavoritesStore empty;
     const auto* store = favStore != nullptr ? favStore : &empty;
 
@@ -756,10 +847,11 @@ void PatchBrowser::rebuildFiltered()
     const auto recentIds = recentStore != nullptr ? recentStore->contentIds() : std::unordered_set<uint64_t> {};
     const auto* recentPtr = (q.recentOnly && recentStore != nullptr) ? &recentIds : nullptr;
 
-    auto filtered = BrowserList::filterForBrowser (all, bankFileView, q, *store, tagStore, recentPtr);
+    auto filtered = BrowserList::filterForBrowser (all, currentScope(), q, *store, tagStore, recentPtr);
     auto voices = std::move (filtered.voices);
 
-    const bool grouping = bankFileView && groupByBank && q.orGroups.empty() && ! q.duplicatesOnly;
+    // Bank view always groups by file; All/Single stay flat.
+    const bool grouping = bankFileView && q.orGroups.empty() && ! q.duplicatesOnly;
     applyColumnSort (voices, grouping);
     // Dedupe after sort so the kept copy matches the active column order.
     if (hideDuplicates && ! q.duplicatesOnly)
@@ -773,7 +865,24 @@ void PatchBrowser::rebuildFiltered()
     if (onStatsChanged)
         onStatsChanged (lastStats);
 
+    suppressLoad = true;
     table.updateContent();
+    if (keepSelected.has_value())
+    {
+        for (int i = 0; i < static_cast<int> (rows.size()); ++i)
+        {
+            if (rows[static_cast<size_t> (i)].kind != BrowserRowKind::voice)
+                continue;
+            const auto& e = rows[static_cast<size_t> (i)].entry;
+            if (e.absolutePath == keepSelected->absolutePath && e.bankSlot == keepSelected->bankSlot)
+            {
+                table.selectRow (i, false, false);
+                lastSentRow = i;
+                break;
+            }
+        }
+    }
+    suppressLoad = false;
     table.repaint();
     updateStickyHeader();
     resized();
@@ -781,7 +890,7 @@ void PatchBrowser::rebuildFiltered()
 
 void PatchBrowser::updateStickyHeader()
 {
-    if (! (bankFileView && groupByBank))
+    if (! bankFileView)
     {
         stickyBank.setText ({}, juce::dontSendNotification);
         return;
@@ -988,6 +1097,11 @@ void PatchBrowser::loadRow (int row, bool loadBank)
 
 void PatchBrowser::selectedRowsChanged (int lastRowSelected)
 {
+    if (suppressLoad)
+        return;
+    // Row is selected on mouse-down, before cellClicked. Right-click must not SysEx-load.
+    if (juce::ModifierKeys::getCurrentModifiers().isPopupMenu())
+        return;
     if (! juce::isPositiveAndBelow (lastRowSelected, static_cast<int> (rows.size())))
         return;
     if (rows[static_cast<size_t> (lastRowSelected)].kind == BrowserRowKind::sectionHeader)
@@ -1251,21 +1365,44 @@ void PatchBrowser::showVoiceContextMenu (int row)
     if (rows[static_cast<size_t> (row)].kind != BrowserRowKind::voice)
         return;
 
-    enum { editTags = 1, openInFolder = 2 };
+    enum
+    {
+        editTags = 1,
+        openInFolder = 2,
+        auditionVoice = 3,
+        setCornerA = 10,
+        setCornerB = 11,
+        setCornerC = 12,
+        setCornerD = 13
+    };
 
     juce::PopupMenu menu;
     menu.setLookAndFeel (&getLookAndFeel());
+    const auto entry = rows[static_cast<size_t> (row)].entry;
+    if (onAuditionVoice)
+        menu.addItem (auditionVoice, "Audition");
+    if (onAssignMorphCorner)
+    {
+        juce::PopupMenu corners;
+        corners.addItem (setCornerA, "A");
+        corners.addItem (setCornerB, "B");
+        corners.addItem (setCornerC, "C");
+        corners.addItem (setCornerD, "D");
+        menu.addSubMenu ("Set morph corner", corners);
+    }
+    if (onAuditionVoice || onAssignMorphCorner)
+        menu.addSeparator();
     menu.addItem (editTags, "Edit tags");
-    const auto& entry = rows[static_cast<size_t> (row)].entry;
     const juce::File file (juce::String::fromUTF8 (entry.absolutePath.string().c_str()));
     menu.addItem (openInFolder, "Open in folder", file.existsAsFile() || file.getParentDirectory().isDirectory());
 
     juce::Component::SafePointer<PatchBrowser> safe (this);
     menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition(),
-                        [safe, row, file] (int result)
+                        [safe, row, file, entry] (int result)
                         {
-                            if (safe == nullptr || result == 0)
+                            if (safe == nullptr)
                                 return;
+
                             if (result == editTags)
                                 safe->editTagsForRow (row);
                             else if (result == openInFolder)
@@ -1275,6 +1412,10 @@ void PatchBrowser::showVoiceContextMenu (int row)
                                 else if (file.getParentDirectory().isDirectory())
                                     file.getParentDirectory().revealToUser();
                             }
+                            else if (result == auditionVoice && safe->onAuditionVoice)
+                                safe->onAuditionVoice (entry);
+                            else if (result >= setCornerA && result <= setCornerD && safe->onAssignMorphCorner)
+                                safe->onAssignMorphCorner (result - setCornerA, entry);
                         });
 }
 
@@ -1292,6 +1433,9 @@ void PatchBrowser::cellClicked (int row, int columnId, const juce::MouseEvent& e
 
     if (e.mods.isPopupMenu())
     {
+        suppressLoad = true;
+        table.selectRow (row, false, true);
+        suppressLoad = false;
         showVoiceContextMenu (row);
         return;
     }
@@ -1301,7 +1445,10 @@ void PatchBrowser::cellClicked (int row, int columnId, const juce::MouseEvent& e
         const auto& entry = rows[static_cast<size_t> (row)].entry;
         if (onFav)
             onFav (entry.contentId);
-        table.repaintRow (row);
+        if (favOnly.getToggleState())
+            rebuildFiltered();
+        else
+            table.repaintRow (row);
         return;
     }
 

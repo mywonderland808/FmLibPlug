@@ -12,6 +12,7 @@
 #include <atomic>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <set>
 #include <thread>
 
@@ -54,9 +55,17 @@ public:
     fmlib::MidiDeviceManager midi;
 
     void applyPreferencesToEngine();
+    /** Write settings.xml only (favorites, MIDI, folders, UI). Do not rewrite tags/morph presets. */
     void persistPreferences();
+    void persistTags();
+    void persistMorphPresets();
+    void persistAllUserData();
     void handleIncomingSysex (const std::vector<uint8_t>& bytes);
     void sendVoice (const fmlib::VoiceData& voice);
+    /** Update last edit-buffer snapshot without a SysEx send (morph stream). */
+    void rememberEditBufferVoice (const fmlib::VoiceData& voice);
+    /** Last voice sent to the edit buffer. */
+    std::optional<fmlib::VoiceData> getLastEditBufferVoice() const { return lastEditBufferVoice; }
     /** Immediate audition using prefs note/velocity/duration. */
     void auditionNote();
     /**
@@ -64,6 +73,9 @@ public:
      * delayMs <= 0 plays immediately.
      */
     void auditionNoteAfterDelay (int delayMs);
+    /** Press-and-hold audition: note on down, off on release. */
+    void auditionHoldStart (int delayMs);
+    void auditionHoldStop();
     /**
      * Audition-style mono note: optional delay before note-on; replaces any prior audition note.
      * Prefer playControllerNote for polyphonic controller performance.
@@ -111,6 +123,8 @@ private:
     int pendingVelocity = 0;
     bool pendingAutoOff = false;
     int pendingAutoOffMs = 250;
+    bool auditionHoldActive = false;
+    std::optional<fmlib::VoiceData> lastEditBufferVoice;
     int pendingControllerNote = -1;
     int pendingControllerVelocity = 0;
     /** Notes queued to fire with the current lead-in (first note is also pendingController*). */

@@ -7,8 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Settings **List button shows**: All voices (flat, including single-voice SysEx) or Single-voice SysEx only; Bank view always groups by bank file name
+- Library / device buffer context menu: **Set morph corner** (A–D) (does not load or pause morph) and **Audition** (loads, then timed note)
+- Audition button is press-and-hold (note on down, off on release); hold `A` mirrors the button press look
+- Settings library folders: per-folder enable checkbox (Rescan applies the set)
+- All / Single views: `< A–Z` / `A–Z >` (Left/Right) jump by first letter or digit of the voice name
+
+### Changed
+- Morph stays active on Library / Morph Presets; ends on device-buffer load or Library-page voice load; Morph-page library click turns off Edge LFO and Note morph and pauses egress until the pad is used again or Edge LFO / Note morph is turned back on
+- Pad, Edge LFO and Note morph stay visible but disabled until all four corners are set
+- Morph pad corner labels always include A–D (`A: BRASS`, `A: (unset)`)
+- Edge LFO and Note morph are mutually exclusive
+- Lock-reference release updates the voice immediately at the main marker, including locked EG/levels while a note is held
+- Settings **Audition duration (ms)** applies to context-menu Audition only (header Audition is hold-to-play)
+- Bank navigation shortcuts are Left/Right (was `P` / `N`); hold `A` for Audition
+- Audition keeps sounding while either the button or `A` remains down
+
 ### Fixed
-- Linux `make build`: `force-relink-clean` no longer deletes VST3/LV2 bundle directories without recreating them, which made `ld` fail (`Datei oder Verzeichnis nicht gefunden`)
+- Turning Edge LFO or Note morph back on resumes morph after a Morph-page library click (no pad click required)
+- Pad and lock-ref markers only move from clicks that start on the morph pad
+- Lock-reference release streams locked-group changes while a note is held (Frequency-only mode no longer waits for silence)
+- Lock chips and Reset stream locked-group changes while a note is held
+- Frequency-only resumes after a lock-ref flush even if Edge LFO is still moving pitch
+- Clicks outside the morph pad cancel a stuck pad / lock-ref drag
+- Left-click on the pad does not move the marker while Edge LFO is running (right-drag lock-ref still works)
+- Note morph hint updates when Edge LFO is turned off by enabling Note morph
+- Left/Right are not consumed in All/Single unless the list is sorted by Patch name
+- Editor teardown stops held audition notes
+- Right-click on library or device buffer selects without SysEx (popup is detected on mouse-down, before the menu handler); context **Audition** loads then plays the note; **Set morph corner** does not pause morph
+- Right-click on morph presets selects and loads like a left-click
+- Settings sliders no longer rewrite preferences on every drag tick
+- Prefs persist writes settings.xml only; tags and morph presets save when those stores change (library clicks no longer rewrite all three files)
+- All/Single A-Z jump is enabled only when the list is sorted by Patch name (ASCII labels)
+- Patch-name sort and A-Z jumps: letter groups A-Z (lowercase, leading junk skipped); numbers and symbols share one group
+- Linux `make build`: `force-relink-clean` no longer deletes VST3/LV2 bundle directories without recreating them, which made `ld` fail (`No such file or directory`)
 - Linux/Windows CLAP verification: `fmlib_find_binary` treats a single `FmLibPlug.clap` file as the plugin binary (not only macOS bundles)
 
 ## [1.2.0] - 2026-08-11

@@ -17,6 +17,7 @@ public:
     using StatusFn = std::function<void(const juce::String&)>;
 
     DeviceBufferPanel();
+    ~DeviceBufferPanel() override = default;
 
     void setBuffer (DeviceBuffer* buffer);
     void refreshList();
@@ -36,6 +37,8 @@ public:
     StatusFn onStatus;
     std::function<std::optional<PatchEntry>()> onQueryDragVoice;
     std::function<void()> onListFocused;
+    std::function<void(int corner0to3, const PatchEntry&)> onAssignMorphCorner;
+    std::function<void(const PatchEntry&)> onAuditionVoice;
 
     juce::ListBox& getList() { return list; }
 
@@ -49,7 +52,7 @@ private:
     int dropHighlightRow = -1;
     int dragSourceRow = -1;
     bool dragOver = false;
-    /** When true, selection changes must not SysEx-load to the device. */
+    /** When true, selection changes must not SysEx-load (drag / silent select). */
     bool suppressLoad = false;
 
     class Model : public juce::ListBoxModel
@@ -65,6 +68,7 @@ private:
 
     void loadRow (int row);
     void selectRowSilent (int row);
+    void showVoiceContextMenu (int row);
     int rowAtDrag (const SourceDetails& details) const;
     bool isLibraryVoiceDrag (const SourceDetails& details) const;
     bool isReorderDrag (const SourceDetails& details) const;

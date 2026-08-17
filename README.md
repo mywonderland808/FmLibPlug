@@ -6,9 +6,12 @@ Product name: **FmLibPlug**. Release notes: [CHANGELOG.md](CHANGELOG.md). Versio
 
 ## Features
 
-- Multi-folder recursive `.syx` / `.dx7` library (case-insensitive), background scan
+- Multi-folder recursive `.syx` / `.dx7` library (case-insensitive), background scan; Settings can enable/disable each folder
 - Voice names from SysEx + tooltips for file/path; optional file columns
-- Bank / Single views: bank files vs one-voice files; optional bank headers (Settings); `[` / `]` prev/next bank; load bank via double-click
+- Bank / All|Single views: Bank always groups by bank file; Settings chooses whether the list button is All voices (flat, including single SysEx) or Single-voice SysEx only; Left/Right prev/next bank or A–Z/digit group; load bank via double-click
+- Hold **Audition** (or hold `A`) to play the configured audition note; release to stop
+- Context **Audition** loads the row then plays the Settings **Audition duration** note
+- Right-click selects (no SysEx); left-click loads. **Set morph corner** does not pause morph
 - Load **1 voice** (edit buffer) or **32-voice bank** via direct MIDI out; audition note
 - Get / receive dumps into a temporary device buffer; drag-drop bank edit; **Send** (1 voice or full 32-bank) / **Save...**
 - Favorites + search (`fav:` / `star:` / `tag:` / `dupe:` / `recent:` / AND/OR) + auto-tag (merge); click Tags to edit; Reset all tags in Settings
@@ -24,10 +27,10 @@ Mid-note voice SysEx on an original DX7 / TX7 clicks or glitches, and that can b
 - **Morph while playing**
   - **Frequency only (smooth pitch)** — default. Oscillator coarse/fine/detune glide live; everything else waits for the next full dump once you stop playing.
   - **All parameters (full sweep)** — the whole voice sweeps in real time, clicks included.
-- **Morph release hold (ms)** (default 250, 0–2000) — how long that saved-up dump waits after the last note-off, so it does not re-latch the patch during the release tail. Raise it for long envelopes; 0 sends immediately. A note morph or a direct pad click/drag cancels the wait; the LFO and the automatic flush still respect it. Playing again before the hold ends restarts the timer from that release.
+- **Morph release hold (ms)** (default 250, 0–2000) — how long that saved-up dump waits after the last note-off, so it does not re-latch the patch during the release tail. Raise it for long envelopes; 0 sends immediately. A note morph, a direct pad click/drag, or a lock-reference release cancels the wait; the LFO and the automatic flush still respect it. Playing again before the hold ends restarts the timer from that release.
 - **Note morph settle (ms)** (default 40, 0–100) — extra gap after the voice dump finishes on the wire before the delayed note-on. Wire time is measured automatically; raise this if note morphs still click on the attack.
 
-Note morph jumps on the first key of a phrase and delays that note-on so the SysEx lands first. Factory locks keep **EG + Levels** at the **lock reference** (hollow marker; right-drag on the pad). Moving Ref does not send SysEx until the next pad morph. Notes on the TX7's own keys need the controller input. **Reset defaults** restores morph, audition, UI options, SysEx pacing and controller thru (MIDI ports/channel, tags and library folders stay as they are).
+Note morph jumps on the first key of a phrase and delays that note-on so the SysEx lands first. Factory locks keep **EG + Levels** at the **lock reference** (hollow marker; right-drag on the pad). Releasing Ref updates the current morph voice immediately, including while a note is held. Pad and Ref only move from clicks that start on the pad. Notes on the TX7's own keys need the controller input. **Reset defaults** restores morph, audition, UI options, SysEx pacing and controller thru (MIDI ports/channel, tags and library folders stay as they are).
 
 ## Requirements
 
@@ -114,7 +117,7 @@ Config: `Tests/hw-midi.local.json` (gitignored), or `--config` / `FMLIBPLUG_HW_C
 - Bank overwrite: Memory Protect OFF + `allowBankWrite` / `FMLIBPLUG_HW_ALLOW_BANK_WRITE=1`
 - Default suite: 1-voice dump, 32-voice dump, edit-buffer round-trip (no bank overwrite)
 - Increase SysEx pacing if USB-MIDI drops data (`FMLIBPLUG_MIDI_PACING_MS` or Settings)
-- Return toggles favorite; Space unbound (DAW transport)
+- Return toggles favorite; Left/Right prev/next bank or A–Z group (when the library list has focus); hold `A` for Audition; Space unbound (DAW transport)
 
 Yamaha, DX7, and TX7 are trademarks of Yamaha Corporation. FmLibPlug is an independent AGPL project and is not affiliated with Yamaha.
 

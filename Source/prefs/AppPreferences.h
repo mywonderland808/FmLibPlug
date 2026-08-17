@@ -10,6 +10,12 @@
 namespace fmlib
 {
 
+struct LibraryFolder
+{
+    std::filesystem::path path;
+    bool enabled = true;
+};
+
 class AppPreferences
 {
 public:
@@ -27,7 +33,9 @@ public:
     void loadFromFile (const juce::File& file);
     void saveToFile (const juce::File& file) const;
 
-    std::vector<std::filesystem::path> baseFolders;
+    std::vector<LibraryFolder> libraryFolders;
+    /** Paths with enabled==true (for scanning). */
+    std::vector<std::filesystem::path> enabledLibraryFolders() const;
     juce::String midiInputName;
     juce::String midiOutputName;
     /** Optional second input for note/CC morph performance (separate from SysEx device). */
@@ -67,10 +75,13 @@ public:
     /** Forward controller MIDI (notes/CC) to MIDI out. Default off. */
     bool midiControllerThru = false;
     bool darkTheme = true;
-    /** Toolbar Bank vs Single: true = bank files (slot 1..32), false = single-voice files. */
+    /** Toolbar Bank vs List: true = bank files (slot 1..32), false = list mode below. */
     bool bankFileView = true;
-    /** When bankFileView: show section headers grouped by bank file. */
-    bool groupByBank = true;
+    /**
+     * When bankFileView is false: 0 = All voices (flat, including single SysEx and bank slots),
+     * 1 = Single-voice SysEx files only. Bank mode always groups by bank file name.
+     */
+    int listViewContents = 0;
     bool showFileColumns = false;
     bool hideDuplicates = false;
     bool showTooltips = true;

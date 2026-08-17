@@ -30,7 +30,7 @@ TEST_CASE ("BrowserList filterForBrowser counters bank view", "[library][browser
     };
 
     const auto q = LibraryFilter::parse ("", false);
-    const auto r = BrowserList::filterForBrowser (all, true, q, favs);
+    const auto r = BrowserList::filterForBrowser (all, BrowserScope::bankFiles, q, favs);
 
     REQUIRE (r.stats.totalInScope == 2); // bank slots only
     REQUIRE (r.stats.shown == 2);
@@ -38,7 +38,7 @@ TEST_CASE ("BrowserList filterForBrowser counters bank view", "[library][browser
     REQUIRE (r.voices.size() == 2);
 }
 
-TEST_CASE ("BrowserList filterForBrowser counters single view", "[library][browser][stats]")
+TEST_CASE ("BrowserList filterForBrowser counters single-sysex view", "[library][browser][stats]")
 {
     FavoritesStore favs;
     std::vector<PatchEntry> all {
@@ -47,12 +47,27 @@ TEST_CASE ("BrowserList filterForBrowser counters single view", "[library][brows
     };
 
     const auto q = LibraryFilter::parse ("", false);
-    const auto r = BrowserList::filterForBrowser (all, false, q, favs);
+    const auto r = BrowserList::filterForBrowser (all, BrowserScope::singleSysex, q, favs);
 
     REQUIRE (r.stats.totalInScope == 1);
     REQUIRE (r.stats.shown == 1);
     REQUIRE (r.stats.duplicates == 0);
     REQUIRE (r.voices.front().voiceName == "Solo");
+}
+
+TEST_CASE ("BrowserList filterForBrowser all voices includes banks and singles", "[library][browser][stats]")
+{
+    FavoritesStore favs;
+    std::vector<PatchEntry> all {
+        makeVoice ("/a/bank.syx", 1, "A1", 1),
+        makeVoice ("/b/single.syx", -1, "Solo", 3),
+    };
+
+    const auto q = LibraryFilter::parse ("", false);
+    const auto r = BrowserList::filterForBrowser (all, BrowserScope::allVoices, q, favs);
+
+    REQUIRE (r.stats.totalInScope == 2);
+    REQUIRE (r.stats.shown == 2);
 }
 
 TEST_CASE ("BrowserList filterForBrowser total survives move into apply", "[library][browser][stats]")
@@ -65,7 +80,7 @@ TEST_CASE ("BrowserList filterForBrowser total survives move into apply", "[libr
     };
 
     const auto q = LibraryFilter::parse ("piano", false);
-    const auto r = BrowserList::filterForBrowser (all, true, q, favs);
+    const auto r = BrowserList::filterForBrowser (all, BrowserScope::bankFiles, q, favs);
 
     // Regression: must not report 0 after scoped is moved into LibraryFilter::apply.
     REQUIRE (r.stats.totalInScope == 3);
@@ -84,7 +99,7 @@ TEST_CASE ("hideDuplicates after sort keeps first in sort order", "[library][bro
     };
 
     const auto q = LibraryFilter::parse ("", false);
-    auto r = BrowserList::filterForBrowser (all, true, q, favs);
+    auto r = BrowserList::filterForBrowser (all, BrowserScope::bankFiles, q, favs);
     REQUIRE (r.stats.totalInScope == 3);
     REQUIRE (r.stats.duplicates == 2);
 

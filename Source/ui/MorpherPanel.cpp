@@ -90,17 +90,12 @@ MorpherPanel::MorpherPanel()
     addAndMakeVisible (setDefaultLocksBtn);
 
     lfoToggle.setClickingTogglesState (true);
-    lfoToggle.setTooltip ("Walk the pad edges (A-B-D-C) continuously. Fine steps, paced by the morph wire budget.");
+    lfoToggle.setTooltip ("Walk the pad edges (A-B-D-C) continuously. Turns off Note morph when enabled. While on, left-click does not move the marker; right-drag still sets lock ref.");
     lfoToggle.onClick = [this]
     {
-        lfoEnabled = lfoToggle.getToggleState();
-        lastLfoStep = -1;
-        if (lfoEnabled)
-            lastTimerMs = juce::Time::getMillisecondCounter();
-        ensureTimerRunning();
+        setLfoEnabled (lfoToggle.getToggleState());
         if (onMorphUiPrefsChanged)
             onMorphUiPrefsChanged();
-        repaint();
     };
     addAndMakeVisible (lfoToggle);
 
@@ -133,8 +128,7 @@ MorpherPanel::MorpherPanel()
             if (noteJumpMode == m)
                 return;
             const auto prev = noteJumpMode;
-            noteJumpMode = m;
-            syncNoteJumpUi();
+            setNoteJumpMode (m);
             if (onMorphUiPrefsChanged)
                 onMorphUiPrefsChanged();
             if (prev == NoteJumpMode::off && m != NoteJumpMode::off && onNoteJumpArmed)
@@ -144,12 +138,13 @@ MorpherPanel::MorpherPanel()
     };
     wireNoteJump (noteJumpOff, NoteJumpMode::off, "No pad jump from Audition / controller notes");
     wireNoteJump (noteJumpRandom, NoteJumpMode::random,
-                  "On each new phrase (first key), jump to a random pad point, then play after a short SysEx lead-in");
+                  "On each new phrase (first key), jump to a random pad point. Turns off Edge LFO.");
     wireNoteJump (noteJumpEdges, NoteJumpMode::edges,
-                  "On each new phrase (first key), cycle the corners A, B, D, C, then play after a short SysEx lead-in");
+                  "On each new phrase (first key), cycle the corners A, B, D, C. Turns off Edge LFO.");
     syncNoteJumpUi();
 
     updateHint();
+    updateMorphControlsEnabled();
 
     presetName.setTextToShowWhenEmpty ("Preset name", juce::Colours::grey);
     presetName.setTooltip ("Name for the next saved preset. Left empty, the generated morph name is used.");
@@ -172,8 +167,7 @@ MorpherPanel::MorpherPanel()
         deviceSlot.addItem (juce::String (i), i);
     deviceSlot.setSelectedId (1, juce::dontSendNotification);
     saveToDevice.setTooltip ("Copy the selected morph preset voice into the plugin Device buffer at the chosen slot (1-32).");
-    presetList.setTooltip ("Click or arrow keys: load preset. Double-click: Morph pad. Right-click: Open in folder.");
-
+    presetList.setTooltip ("Click or arrow keys: load preset. Double-click: Morph pad. Right-click: load and Open in folder.");
     savePreset.onClick = [this] { saveCurrentPreset(); };
     deletePreset.onClick = [this] { deleteSelectedPreset(); };
     saveToDevice.onClick = [this] { saveSelectedPresetToDeviceSlot(); };
@@ -214,8 +208,41 @@ void MorpherPanel::setLockRefPosition (float x, float y)
     lockRefX = juce::jlimit (0.0f, 1.0f, x);
     lockRefY = juce::jlimit (0.0f, 1.0f, y);
     lastSentVoice.reset();
-    emitMorph (false);
+    emitMorph (false, true);
     repaint();
+}
+
+void MorpherPanel::setEgressPaused (bool paused)
+{
+    egressPaused = paused;
+    if (! egressPaused)
+        ensureTimerRunning();
+}
+
+void MorpherPanel::reemitCurrent()
+{
+    egressPaused = false;
+    lastSentVoice.reset();
+    emitMorph (false);
+    ensureTimerRunning();
+}
+
+void MorpherPanel::resumeEgressIfPaused()
+{
+    if (! egressPaused)
+        return;
+    if (onPadGestureStarted)
+        onPadGestureStarted();
+    else
+        setEgressPaused (false);
+}
+
+void MorpherPanel::stopMotionDrivers()
+{
+    if (lfoEnabled)
+        setLfoEnabled (false);
+    if (noteJumpMode != NoteJumpMode::off)
+        setNoteJumpMode (NoteJumpMode::off);
 }
 
 void MorpherPanel::setDefaultLockRefPosition (float x, float y)
@@ -228,9 +255,18 @@ void MorpherPanel::setLfoEnabled (bool on)
 {
     lfoEnabled = on;
     lastLfoStep = -1;
-    syncLfoUi();
     if (lfoEnabled)
+    {
         lastTimerMs = juce::Time::getMillisecondCounter();
+        if (noteJumpMode != NoteJumpMode::off)
+        {
+            noteJumpMode = NoteJumpMode::off;
+            syncNoteJumpUi();
+        }
+        resumeEgressIfPaused();
+    }
+    syncLfoUi();
+    updateHint();
     ensureTimerRunning();
     repaint();
 }
@@ -244,7 +280,17 @@ void MorpherPanel::setLfoRateHz (float hz)
 void MorpherPanel::setNoteJumpMode (NoteJumpMode m)
 {
     noteJumpMode = m;
+    if (noteJumpMode != NoteJumpMode::off && lfoEnabled)
+    {
+        lfoEnabled = false;
+        lastLfoStep = -1;
+        syncLfoUi();
+        ensureTimerRunning();
+    }
+    if (noteJumpMode != NoteJumpMode::off)
+        resumeEgressIfPaused();
     syncNoteJumpUi();
+    updateHint();
 }
 
 void MorpherPanel::syncNoteJumpUi()
@@ -309,7 +355,7 @@ void MorpherPanel::applyLockChipToggles()
     if (lockTranspose.getToggleState()) g |= morphLockTranspose;
     lockGroups = g;
     lastSentVoice.reset();
-    emitMorph (false);
+    emitMorph (false, true);
     if (onMorphUiPrefsChanged)
         onMorphUiPrefsChanged();
 }
@@ -332,7 +378,7 @@ void MorpherPanel::resetLocksToDefaults()
     lockRefY = defaultLockRefY;
     syncLockChipsFromFlags();
     lastSentVoice.reset();
-    emitMorph (false);
+    emitMorph (false, true);
     if (onMorphUiPrefsChanged)
         onMorphUiPrefsChanged();
     if (onStatus)
@@ -374,6 +420,7 @@ void MorpherPanel::setMode (Mode m)
     if (! morph)
         refreshPresetList();
     ensureTimerRunning();
+    updateMorphControlsEnabled();
     resized();
     repaint();
 }
@@ -397,20 +444,41 @@ VoiceData MorpherPanel::morphAtCurrent() const
 void MorpherPanel::updateHint()
 {
     if (allCornersReady())
-        hint.setText ("Drag to morph. Right-drag = lock ref (locked groups follow Ref; applies on next morph).",
-                      juce::dontSendNotification);
+    {
+        if (lfoEnabled)
+            hint.setText ("Edge LFO drives the marker. Right-drag = lock ref (updates the voice when you release, including held notes).",
+                          juce::dontSendNotification);
+        else
+            hint.setText ("Drag to morph. Right-drag = lock ref (updates the voice when you release, including held notes).",
+                          juce::dontSendNotification);
+    }
     else
-        hint.setText ("Select a library voice, Set all four corners (A-D), then drag.",
+        hint.setText ("Select a library voice, Set all four corners (A-D). Pad, LFO and Note morph stay off until then.",
                       juce::dontSendNotification);
+}
+
+void MorpherPanel::updateMorphControlsEnabled()
+{
+    const bool ready = allCornersReady();
+    const bool morph = mode == Mode::morph;
+    const bool on = morph && ready;
+
+    for (auto* c : { &lfoToggle, &noteJumpOff, &noteJumpRandom, &noteJumpEdges })
+        c->setEnabled (on);
+    lfoRate.setEnabled (on);
+    lfoRateLabel.setEnabled (on);
+    noteJumpLabel.setEnabled (on);
+    // Pad input is gated in mouse handlers; locks/assign stay usable while building corners.
 }
 
 juce::String MorpherPanel::cornerDisplayName (int corner) const
 {
     if (corner < 0 || corner > 3)
         return {};
+    const auto letter = juce::String::charToString (static_cast<juce::juce_wchar> ('A' + corner));
     if (! cornerSet[corner] || cornerNames[corner].isEmpty())
-        return juce::String::charToString (static_cast<juce::juce_wchar> ('A' + corner)) + " (unset)";
-    return cornerNames[corner];
+        return letter + ": (unset)";
+    return letter + ": " + cornerNames[corner];
 }
 
 int MorpherPanel::percent99 (float t)
@@ -429,6 +497,7 @@ void MorpherPanel::setCorner (int corner0to3, const VoiceData& v, const juce::St
     if (onMorphInvalidate)
         onMorphInvalidate();
     updateHint();
+    updateMorphControlsEnabled();
     emitMorph (false);
     repaint();
 }
@@ -449,6 +518,7 @@ void MorpherPanel::clearCorners()
     if (onMorphInvalidate)
         onMorphInvalidate();
     updateHint();
+    updateMorphControlsEnabled();
     repaint();
 }
 
@@ -754,10 +824,36 @@ void MorpherPanel::commitLockRef()
 {
     if (onMorphUiPrefsChanged)
         onMorphUiPrefsChanged();
+    lastSentVoice.reset();
+    if (egressPaused)
+    {
+        if (onStatus)
+            onStatus ("Lock reference @ " + juce::String (percent99 (lockRefX)) + "%, "
+                      + juce::String (percent99 (lockRefY))
+                      + "% (morph paused — applies on resume)");
+        return;
+    }
+    emitMorph (false, true);
     if (onStatus)
         onStatus ("Lock reference @ " + juce::String (percent99 (lockRefX)) + "%, "
                   + juce::String (percent99 (lockRefY))
-                  + "% (locked groups follow Ref; next pad morph sends)");
+                  + "% (locked groups follow Ref; voice updated)");
+}
+
+bool MorpherPanel::padContains (juce::Point<float> p) const
+{
+    return padBounds.toFloat().contains (p);
+}
+
+void MorpherPanel::cancelPadGesture()
+{
+    const bool wasLive = padGesture || lockRefDragging || padDragging;
+    padGesture = false;
+    padDragging = false;
+    lockRefDragging = false;
+    pendingMorph = false;
+    if (wasLive)
+        repaint();
 }
 
 void MorpherPanel::mouseDown (const juce::MouseEvent& e)
@@ -765,19 +861,41 @@ void MorpherPanel::mouseDown (const juce::MouseEvent& e)
     if (mode != Mode::morph || padBounds.isEmpty())
         return;
 
+    if (! padContains (e.position))
+    {
+        cancelPadGesture();
+        return;
+    }
+
+    if (! allCornersReady())
+    {
+        cancelPadGesture();
+        return;
+    }
+
     if (e.mods.isPopupMenu())
     {
+        padGesture = true;
         lockRefDragging = true;
         padDragging = false;
         updateLockRefFromPoint (e.position);
         return;
     }
 
+    if (lfoEnabled)
+    {
+        cancelPadGesture();
+        return;
+    }
+
+    padGesture = true;
     lockRefDragging = false;
     padDragging = false;
     pendingMorph = false;
     if (! lfoEnabled)
         stopTimer();
+    if (egressPaused)
+        setEgressPaused (false);
     if (onPadGestureStarted)
         onPadGestureStarted();
     padDownPos = e.position;
@@ -787,7 +905,7 @@ void MorpherPanel::mouseDown (const juce::MouseEvent& e)
 
 void MorpherPanel::mouseDrag (const juce::MouseEvent& e)
 {
-    if (mode != Mode::morph || padBounds.isEmpty())
+    if (! padGesture || mode != Mode::morph || padBounds.isEmpty())
         return;
 
     if (lockRefDragging)
@@ -810,8 +928,12 @@ void MorpherPanel::mouseDrag (const juce::MouseEvent& e)
 
 void MorpherPanel::mouseUp (const juce::MouseEvent& e)
 {
-    if (mode != Mode::morph || padBounds.isEmpty())
+    if (! padGesture || mode != Mode::morph || padBounds.isEmpty())
+    {
+        cancelPadGesture();
         return;
+    }
+    padGesture = false;
 
     if (lockRefDragging)
     {
@@ -880,7 +1002,8 @@ void MorpherPanel::edgePosition (float phase01, bool clockwise, float& x, float&
 
 void MorpherPanel::advanceLfo (double deltaSeconds)
 {
-    if (! lfoEnabled || padDragging || lockRefDragging || mode != Mode::morph || ! allCornersReady())
+    if (! lfoEnabled || padDragging || lockRefDragging || mode != Mode::morph || ! allCornersReady()
+        || egressPaused)
         return;
 
     lfoPhase += (float) (deltaSeconds * (double) lfoRateHz);
@@ -968,9 +1091,9 @@ void MorpherPanel::timerCallback()
     emitMorph (true);
 }
 
-void MorpherPanel::emitMorph (bool dragEmit)
+void MorpherPanel::emitMorph (bool dragEmit, bool liveAllParams)
 {
-    if (! onMorph || ! allCornersReady())
+    if (! onMorph || ! allCornersReady() || egressPaused)
         return;
 
     auto voice = morphAtCurrent();
@@ -978,7 +1101,7 @@ void MorpherPanel::emitMorph (bool dragEmit)
         return;
 
     lastSentVoice = voice;
-    onMorph (voice, dragEmit);
+    onMorph (voice, dragEmit, liveAllParams);
 }
 
 void MorpherPanel::refreshPresetList()
@@ -1030,11 +1153,19 @@ void MorpherPanel::loadSelectedPreset (bool switchToMorphPad)
     lockRefY = juce::jlimit (0.0f, 1.0f, p.lockRefY);
     syncLockChipsFromFlags();
     lastSentVoice.reset();
+    lastLfoStep = -1;
+    lastTimerMs = juce::Time::getMillisecondCounter();
     if (onMorphInvalidate)
         onMorphInvalidate();
+    egressPaused = false;
     updateHint();
+    updateMorphControlsEnabled();
     emitMorph (false);
+    ensureTimerRunning();
     repaint();
+
+    if (onPresetApplied)
+        onPresetApplied();
 
     if (switchToMorphPad)
         setMode (Mode::morph);
@@ -1077,7 +1208,7 @@ void MorpherPanel::paintListBoxItem (int row, juce::Graphics& g, int w, int h, b
 {
     if (store == nullptr || ! juce::isPositiveAndBelow (row, static_cast<int> (store->items().size())))
         return;
-    g.fillAll (selected ? findColour (juce::TextEditor::highlightColourId)
+    g.fillAll (selected ? findColour (juce::TextEditor::highlightColourId).withAlpha (0.45f)
                          : findColour (juce::ListBox::backgroundColourId));
     g.setColour (findColour (juce::Label::textColourId));
     const auto& p = store->items()[static_cast<size_t> (row)];
@@ -1089,7 +1220,11 @@ void MorpherPanel::paintListBoxItem (int row, juce::Graphics& g, int w, int h, b
 void MorpherPanel::listBoxItemClicked (int row, const juce::MouseEvent& e)
 {
     if (e.mods.isPopupMenu())
+    {
+        presetList.selectRow (row);
         showPresetContextMenu (row);
+        return;
+    }
 }
 
 void MorpherPanel::showPresetContextMenu (int row)
@@ -1106,9 +1241,9 @@ void MorpherPanel::showPresetContextMenu (int row)
     menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition(),
                         [safe] (int result)
                         {
-                            if (safe == nullptr || result != 1)
+                            if (safe == nullptr)
                                 return;
-                            if (safe->onRevealMorphPresetsFile)
+                            if (result == 1 && safe->onRevealMorphPresetsFile)
                                 safe->onRevealMorphPresetsFile();
                         });
 }
@@ -1116,6 +1251,8 @@ void MorpherPanel::showPresetContextMenu (int row)
 void MorpherPanel::selectedRowsChanged (int)
 {
     if (suppressPresetAutoLoad || mode != Mode::presets)
+        return;
+    if (juce::ModifierKeys::getCurrentModifiers().isPopupMenu())
         return;
     loadSelectedPreset (false);
 }

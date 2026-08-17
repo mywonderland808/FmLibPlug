@@ -36,7 +36,7 @@ DeviceBufferPanel::DeviceBufferPanel()
     send.setTooltip ("Send 1 voice, or a full 32-voice bank if the buffer has 32 slots.");
     req1.setTooltip ("Get a 1-voice dump from the device.");
     req32.setTooltip ("Get a 32-voice bank dump from the device.");
-    list.setTooltip ("Drag to swap slots. Drop a library voice onto a slot to assign. Drag does not send to the device.");
+    list.setTooltip ("Click a slot to load it. Drag to swap. Drop a library voice onto a slot to assign.");
 }
 
 void DeviceBufferPanel::setBuffer (DeviceBuffer* buffer)
@@ -54,8 +54,10 @@ void DeviceBufferPanel::reportStatus (const juce::String& s)
 
 void DeviceBufferPanel::refreshList()
 {
-    lastSentRow = -1;
     list.updateContent();
+    const int n = model.getNumRows();
+    if (! juce::isPositiveAndBelow (lastSentRow, n))
+        lastSentRow = -1;
     list.repaint();
 }
 
@@ -165,6 +167,10 @@ void DeviceBufferPanel::itemDropped (const SourceDetails& details)
         if (dragSourceRow >= 0 && row >= 0 && dragSourceRow != row)
         {
             buf->swapVoices (dragSourceRow, row);
+            if (lastSentRow == dragSourceRow)
+                lastSentRow = row;
+            else if (lastSentRow == row)
+                lastSentRow = dragSourceRow;
             refreshList();
             selectRowSilent (row);
             reportStatus ("Swapped slots " + juce::String (dragSourceRow + 1)
@@ -210,6 +216,8 @@ void DeviceBufferPanel::loadRow (int row)
         return;
     if (row == lastSentRow)
         return;
+    if (voices[static_cast<size_t> (row)].voiceName == "(empty)")
+        return;
     lastSentRow = row;
     onLoadVoice (voices[static_cast<size_t> (row)]);
 }
@@ -226,7 +234,8 @@ void DeviceBufferPanel::Model::paintListBoxItem (int row, juce::Graphics& g, int
     const auto& voices = owner->buf->getVoices();
     if (! juce::isPositiveAndBelow (row, static_cast<int> (voices.size())))
         return;
-    g.fillAll (selected ? owner->findColour (juce::TextButton::buttonOnColourId) : juce::Colours::transparentBlack);
+    g.fillAll (selected ? owner->findColour (juce::TextEditor::highlightColourId).withAlpha (0.45f)
+                         : juce::Colours::transparentBlack);
     g.setColour (owner->findColour (juce::Label::textColourId));
     const auto& e = voices[static_cast<size_t> (row)];
     auto label = toJuce (e.voiceName);
@@ -239,13 +248,31 @@ void DeviceBufferPanel::Model::selectedRowsChanged (int lastRowSelected)
 {
     if (owner == nullptr || owner->suppressLoad)
         return;
+    if (juce::ModifierKeys::getCurrentModifiers().isPopupMenu())
+        return;
     owner->loadRow (lastRowSelected);
 }
 
-void DeviceBufferPanel::Model::listBoxItemClicked (int row, const juce::MouseEvent&)
+void DeviceBufferPanel::Model::listBoxItemClicked (int row, const juce::MouseEvent& e)
 {
-    if (owner == nullptr || owner->suppressLoad)
+    if (owner == nullptr)
         return;
+
+    if (e.mods.isPopupMenu())
+    {
+        owner->list.grabKeyboardFocus();
+        if (owner->onListFocused)
+            owner->onListFocused();
+        owner->suppressLoad = true;
+        owner->list.selectRow (row);
+        owner->suppressLoad = false;
+        owner->showVoiceContextMenu (row);
+        return;
+    }
+
+    if (owner->suppressLoad)
+        return;
+
     owner->list.grabKeyboardFocus();
     if (owner->onListFocused)
         owner->onListFocused();
@@ -254,6 +281,55 @@ void DeviceBufferPanel::Model::listBoxItemClicked (int row, const juce::MouseEve
         owner->lastSentRow = -1;
         owner->loadRow (row);
     }
+}
+
+void DeviceBufferPanel::showVoiceContextMenu (int row)
+{
+    if (buf == nullptr)
+        return;
+    const auto& voices = buf->getVoices();
+    if (! juce::isPositiveAndBelow (row, static_cast<int> (voices.size())))
+        return;
+
+    enum
+    {
+        auditionVoice = 1,
+        setCornerA = 10,
+        setCornerB = 11,
+        setCornerC = 12,
+        setCornerD = 13
+    };
+
+    juce::PopupMenu menu;
+    menu.setLookAndFeel (&getLookAndFeel());
+    const auto entry = voices[static_cast<size_t> (row)];
+    const bool canAudition = onAuditionVoice && entry.voiceName != "(empty)";
+    if (onAuditionVoice)
+        menu.addItem (auditionVoice, "Audition", canAudition);
+    if (onAssignMorphCorner)
+    {
+        juce::PopupMenu corners;
+        corners.addItem (setCornerA, "A");
+        corners.addItem (setCornerB, "B");
+        corners.addItem (setCornerC, "C");
+        corners.addItem (setCornerD, "D");
+        menu.addSubMenu ("Set morph corner", corners);
+    }
+    if (menu.getNumItems() == 0)
+        return;
+
+    juce::Component::SafePointer<DeviceBufferPanel> safe (this);
+    menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition(),
+                        [safe, entry] (int result)
+                        {
+                            if (safe == nullptr)
+                                return;
+
+                            if (result == auditionVoice && safe->onAuditionVoice)
+                                safe->onAuditionVoice (entry);
+                            else if (result >= setCornerA && result <= setCornerD && safe->onAssignMorphCorner)
+                                safe->onAssignMorphCorner (result - setCornerA, entry);
+                        });
 }
 
 juce::var DeviceBufferPanel::Model::getDragSourceDescription (const juce::SparseSet<int>& rowsToDescribe)

@@ -22,6 +22,10 @@ SettingsPanel::SettingsPanel()
 {
     folderModel.owner = this;
     folderList.setModel (&folderModel);
+    foldersLabel.setTooltip (
+        "Library base folders. Tick/untick to enable or disable a folder (saved immediately). "
+        "Click Rescan library to rebuild the preset list.");
+    folderList.setTooltip (foldersLabel.getTooltip());
     addAndMakeVisible (foldersLabel);
     addAndMakeVisible (folderList);
     addAndMakeVisible (addFolder);
@@ -50,7 +54,8 @@ SettingsPanel::SettingsPanel()
     addAndMakeVisible (auditionVel);
     addAndMakeVisible (auditionMs);
     addAndMakeVisible (dark);
-    addAndMakeVisible (groupByBank);
+    addAndMakeVisible (listViewLabel);
+    addAndMakeVisible (listViewContents);
     addAndMakeVisible (showFileColumns);
     addAndMakeVisible (hideDuplicates);
     addAndMakeVisible (showTooltips);
@@ -91,7 +96,14 @@ SettingsPanel::SettingsPanel()
     setupSlider (auditionMs, 50, 2000, 10, " ms");
 
     dark.setTooltip ("Switch between dark and light UI colours.");
-    groupByBank.setTooltip ("In Bank view only: show sticky/section headers per bank file. Off = flat list of bank voices.");
+    listViewLabel.setTooltip (
+        "What the non-Bank toolbar button shows. All voices = flat list of every preset, including "
+        "single-voice SysEx and bank-file voices. Single-voice SysEx only = true one-voice files. "
+        "Bank mode always groups by bank file name.");
+    listViewContents.addItem ("All voices (flat)", 1);
+    listViewContents.addItem ("Single-voice SysEx only", 2);
+    listViewContents.setSelectedItemIndex (0, juce::dontSendNotification);
+    listViewContents.setTooltip (listViewLabel.getTooltip());
     showFileColumns.setTooltip ("Show File and Folder columns in the patch list.");
     hideDuplicates.setTooltip ("Hide byte-identical voices (keeps the first after the current column sort).");
     showTooltips.setTooltip ("Enable or disable tooltips across the UI.");
@@ -116,11 +128,11 @@ SettingsPanel::SettingsPanel()
         "All parameters: the whole voice sweeps live, which clicks on old hardware.");
     noteLabel.setTooltip ("MIDI note used by the Audition button.");
     velLabel.setTooltip ("Velocity of the Audition note.");
-    durLabel.setTooltip ("How long the audition note stays on before note-off (ms).");
+    durLabel.setTooltip ("Note length for context-menu Audition. The header Audition button is press-and-hold and ignores this.");
     midiInLabel.setTooltip ("Device / SysEx input (TX7/DX7 dumps).");
     midiControllerLabel.setTooltip ("Separate input for Note On morph performance. Leave (none) if unused.");
     applyMidiPorts.setTooltip ("Apply the selected MIDI device in/out and controller input. Port changes are not used until you click this.");
-    rescan.setTooltip ("Rescan all library folders for .syx / .dx7 files.");
+    rescan.setTooltip ("Apply enabled library folders and rescan for .syx / .dx7 files.");
     autoTag.setTooltip ("Add name-based category/mood tags. Merges with existing tags; does not remove manual tags.");
     resetTags.setTooltip ("Delete every tag in the library (manual and auto). Asks for confirmation.");
     resetDefaults.setTooltip (
@@ -148,20 +160,41 @@ SettingsPanel::SettingsPanel()
     resetTags.onClick = [this] { if (onResetTags) onResetTags(); };
     resetDefaults.onClick = [this] { resetNonMidiDefaults(); };
     dark.onClick = [this] { if (onThemeChanged) onThemeChanged(); };
-    groupByBank.onClick = [this] { if (onBrowserPrefsChanged) onBrowserPrefsChanged(); };
+    listViewContents.onChange = [this] { if (onBrowserPrefsChanged) onBrowserPrefsChanged(); };
     showFileColumns.onClick = [this] { if (onBrowserPrefsChanged) onBrowserPrefsChanged(); };
     hideDuplicates.onClick = [this] { if (onBrowserPrefsChanged) onBrowserPrefsChanged(); };
     showTooltips.onClick = [this] { if (onTooltipsChanged) onTooltipsChanged(); };
-    midiControllerThru.onClick = [this] { if (onMorphPrefsChanged) onMorphPrefsChanged(); };
+    midiControllerThru.onClick = [this]
+    {
+        if (onMorphPrefsChanged)
+            onMorphPrefsChanged();
+        if (onMorphPrefsPersist)
+            onMorphPrefsPersist();
+    };
+    morphStream.onChange = [this]
+    {
+        if (onMorphPrefsChanged)
+            onMorphPrefsChanged();
+        if (onMorphPrefsPersist)
+            onMorphPrefsPersist();
+    };
+    // Live-apply on drag; persist once on release (avoids writing settings.xml every tick).
     morphEmit.onValueChange = [this] { if (onMorphPrefsChanged) onMorphPrefsChanged(); };
     morphRelease.onValueChange = [this] { if (onMorphPrefsChanged) onMorphPrefsChanged(); };
     noteSettle.onValueChange = [this] { if (onMorphPrefsChanged) onMorphPrefsChanged(); };
-    morphStream.onChange = [this] { if (onMorphPrefsChanged) onMorphPrefsChanged(); };
+    morphEmit.onDragEnd = [this] { if (onMorphPrefsPersist) onMorphPrefsPersist(); };
+    morphRelease.onDragEnd = [this] { if (onMorphPrefsPersist) onMorphPrefsPersist(); };
+    noteSettle.onDragEnd = [this] { if (onMorphPrefsPersist) onMorphPrefsPersist(); };
     channel.onValueChange = [this] { if (onMidiParamsChanged) onMidiParamsChanged(); };
     pacing.onValueChange = [this] { if (onMidiParamsChanged) onMidiParamsChanged(); };
+    channel.onDragEnd = [this] { if (onMidiParamsPersist) onMidiParamsPersist(); };
+    pacing.onDragEnd = [this] { if (onMidiParamsPersist) onMidiParamsPersist(); };
     auditionNote.onValueChange = [this] { if (onAuditionChanged) onAuditionChanged(); };
     auditionVel.onValueChange = [this] { if (onAuditionChanged) onAuditionChanged(); };
     auditionMs.onValueChange = [this] { if (onAuditionChanged) onAuditionChanged(); };
+    auditionNote.onDragEnd = [this] { if (onAuditionPersist) onAuditionPersist(); };
+    auditionVel.onDragEnd = [this] { if (onAuditionPersist) onAuditionPersist(); };
+    auditionMs.onDragEnd = [this] { if (onAuditionPersist) onAuditionPersist(); };
 
     wireSliderFactoryDoubleClick();
 }
@@ -193,7 +226,7 @@ void SettingsPanel::resetNonMidiDefaults()
     auditionVel.setValue (def.auditionVelocity, juce::dontSendNotification);
     auditionMs.setValue (def.auditionDurationMs, juce::dontSendNotification);
     dark.setToggleState (def.darkTheme, juce::dontSendNotification);
-    groupByBank.setToggleState (def.groupByBank, juce::dontSendNotification);
+    listViewContents.setSelectedItemIndex (def.listViewContents, juce::dontSendNotification);
     showFileColumns.setToggleState (def.showFileColumns, juce::dontSendNotification);
     hideDuplicates.setToggleState (def.hideDuplicates, juce::dontSendNotification);
     showTooltips.setToggleState (def.showTooltips, juce::dontSendNotification);
@@ -201,10 +234,16 @@ void SettingsPanel::resetNonMidiDefaults()
 
     if (onMidiParamsChanged)
         onMidiParamsChanged();
+    if (onMidiParamsPersist)
+        onMidiParamsPersist();
     if (onMorphPrefsChanged)
         onMorphPrefsChanged();
+    if (onMorphPrefsPersist)
+        onMorphPrefsPersist();
     if (onAuditionChanged)
         onAuditionChanged();
+    if (onAuditionPersist)
+        onAuditionPersist();
     if (onThemeChanged)
         onThemeChanged();
     if (onBrowserPrefsChanged)
@@ -226,10 +265,11 @@ void SettingsPanel::applyThemeColours (bool darkTheme)
     checklist.setColour (juce::Label::textColourId, p.text);
     foldersLabel.setColour (juce::Label::textColourId, p.text);
     for (auto* l : { &midiInLabel, &midiControllerLabel, &midiOutLabel, &channelLabel, &pacingLabel, &morphEmitLabel,
-                     &morphReleaseLabel, &noteSettleLabel, &morphStreamLabel, &noteLabel, &velLabel, &durLabel })
+                     &morphReleaseLabel, &noteSettleLabel, &morphStreamLabel, &noteLabel, &velLabel, &durLabel,
+                     &listViewLabel })
         l->setColour (juce::Label::textColourId, p.text);
 
-    for (auto* t : { &dark, &groupByBank, &showFileColumns, &hideDuplicates, &showTooltips,
+    for (auto* t : { &dark, &showFileColumns, &hideDuplicates, &showTooltips,
                      &midiControllerThru })
         t->setColour (juce::ToggleButton::textColourId, p.text);
 
@@ -246,6 +286,7 @@ void SettingsPanel::applyThemeColours (bool darkTheme)
     paintCombo (midiControllerIn);
     paintCombo (midiOut);
     paintCombo (morphStream);
+    paintCombo (listViewContents);
 
     auto paintSlider = [&] (juce::Slider& s)
     {
@@ -298,7 +339,13 @@ void SettingsPanel::setFolderPaths (const std::vector<std::filesystem::path>& pa
 {
     folders.clear();
     for (const auto& p : paths)
-        folders.push_back (toJuce (p.string()));
+        folders.push_back ({ p, true });
+    folderList.updateContent();
+}
+
+void SettingsPanel::setLibraryFolders (const std::vector<LibraryFolder>& next)
+{
+    folders = next;
     folderList.updateContent();
 }
 
@@ -306,7 +353,7 @@ void SettingsPanel::addFolderPath (const juce::String& path)
 {
     if (path.isNotEmpty())
     {
-        folders.push_back (path);
+        folders.push_back ({ path.toStdString(), true });
         folderList.updateContent();
         if (onFoldersChanged)
             onFoldersChanged();
@@ -325,12 +372,28 @@ void SettingsPanel::removeSelectedFolder()
     }
 }
 
+void SettingsPanel::toggleFolderEnabled (int row)
+{
+    if (! juce::isPositiveAndBelow (row, static_cast<int> (folders.size())))
+        return;
+    folders[static_cast<size_t> (row)].enabled = ! folders[static_cast<size_t> (row)].enabled;
+    folderList.repaintRow (row);
+    if (onFoldersChanged)
+        onFoldersChanged();
+}
+
 std::vector<std::filesystem::path> SettingsPanel::getFolderPaths() const
 {
     std::vector<std::filesystem::path> out;
-    for (const auto& s : folders)
-        out.emplace_back (s.toStdString());
+    for (const auto& folder : folders)
+        if (folder.enabled)
+            out.push_back (folder.path);
     return out;
+}
+
+std::vector<LibraryFolder> SettingsPanel::getLibraryFolders() const
+{
+    return folders;
 }
 
 void SettingsPanel::setMidiLists (const juce::StringArray& inputs, const juce::StringArray& outputs)
@@ -402,9 +465,13 @@ void SettingsPanel::resized()
     layoutLabeled (r, durLabel, auditionMs);
 
     r.removeFromTop (6);
-    auto toggles = r.removeFromTop (144);
+    auto toggles = r.removeFromTop (168);
     dark.setBounds (toggles.removeFromTop (24));
-    groupByBank.setBounds (toggles.removeFromTop (24));
+    {
+        auto listRow = toggles.removeFromTop (28);
+        listViewLabel.setBounds (listRow.removeFromLeft (140));
+        listViewContents.setBounds (listRow.reduced (2));
+    }
     showFileColumns.setBounds (toggles.removeFromTop (24));
     hideDuplicates.setBounds (toggles.removeFromTop (24));
     showTooltips.setBounds (toggles.removeFromTop (24));
@@ -423,8 +490,30 @@ void SettingsPanel::FolderModel::paintListBoxItem (int row, juce::Graphics& g, i
         return;
     g.fillAll (selected ? owner->findColour (juce::TextEditor::highlightColourId).withAlpha (0.35f)
                          : owner->findColour (juce::ListBox::backgroundColourId));
+
+    const auto& folder = owner->folders[static_cast<size_t> (row)];
+    constexpr int box = 14;
+    const int boxY = (h - box) / 2;
+    auto tick = juce::Rectangle<float> (6.0f, (float) boxY, (float) box, (float) box);
     g.setColour (owner->findColour (juce::Label::textColourId));
-    g.drawText (owner->folders[static_cast<size_t> (row)], 4, 0, w - 8, h, juce::Justification::centredLeft, true);
+    g.drawRect (tick, 1.2f);
+    if (folder.enabled)
+    {
+        g.setColour (owner->findColour (juce::ToggleButton::tickColourId));
+        g.fillRect (tick.reduced (3.0f));
+    }
+
+    g.setColour (owner->findColour (juce::Label::textColourId)
+                     .withMultipliedAlpha (folder.enabled ? 1.0f : 0.45f));
+    g.drawText (toJuce (folder.path.string()), 28, 0, w - 32, h, juce::Justification::centredLeft, true);
+}
+
+void SettingsPanel::FolderModel::listBoxItemClicked (int row, const juce::MouseEvent& e)
+{
+    if (owner == nullptr)
+        return;
+    if (e.x < 28)
+        owner->toggleFolderEnabled (row);
 }
 
 } // namespace fmlib

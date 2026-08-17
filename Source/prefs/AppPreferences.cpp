@@ -38,8 +38,12 @@ void AppPreferences::loadFromFile (const juce::File& f)
     if (auto xml = juce::XmlDocument::parse (f))
     {
         darkTheme = xml->getBoolAttribute ("dark", true);
-        groupByBank = xml->getBoolAttribute ("groupByBank", true);
         bankFileView = xml->getBoolAttribute ("bankFileView", true);
+        if (xml->hasAttribute ("listViewContents"))
+            listViewContents = juce::jlimit (0, 1, xml->getIntAttribute ("listViewContents", 0));
+        else
+            // Former groupByBank only affected Bank headers; List defaults to all voices.
+            listViewContents = 0;
         showFileColumns = xml->getBoolAttribute ("showFileColumns", false);
         hideDuplicates = xml->getBoolAttribute ("hideDuplicates", false);
         showTooltips = xml->getBoolAttribute ("showTooltips", true);
@@ -96,12 +100,19 @@ void AppPreferences::loadFromFile (const juce::File& f)
         midiInputName = xml->getStringAttribute ("midiIn");
         midiOutputName = xml->getStringAttribute ("midiOut");
         midiControllerInputName = xml->getStringAttribute ("midiControllerIn");
-        baseFolders.clear();
+        libraryFolders.clear();
         if (auto* folders = xml->getChildByName ("folders"))
         {
             for (auto* c = folders->getFirstChildElement(); c != nullptr; c = c->getNextElement())
-                if (c->hasTagName ("folder"))
-                    baseFolders.emplace_back (c->getStringAttribute ("path").toStdString());
+            {
+                if (! c->hasTagName ("folder"))
+                    continue;
+                LibraryFolder folder;
+                folder.path = c->getStringAttribute ("path").toStdString();
+                folder.enabled = c->getBoolAttribute ("enabled", true);
+                if (! folder.path.empty())
+                    libraryFolders.push_back (std::move (folder));
+            }
         }
         favoriteIds.clear();
         if (auto* fav = xml->getChildByName ("favorites"))
@@ -122,8 +133,8 @@ void AppPreferences::saveToFile (const juce::File& f) const
 {
     auto xml = std::make_unique<juce::XmlElement> ("FmLibPlugSettings");
     xml->setAttribute ("dark", darkTheme);
-    xml->setAttribute ("groupByBank", groupByBank);
     xml->setAttribute ("bankFileView", bankFileView);
+    xml->setAttribute ("listViewContents", listViewContents);
     xml->setAttribute ("showFileColumns", showFileColumns);
     xml->setAttribute ("hideDuplicates", hideDuplicates);
     xml->setAttribute ("showTooltips", showTooltips);
@@ -150,14 +161,28 @@ void AppPreferences::saveToFile (const juce::File& f) const
     xml->setAttribute ("midiOut", midiOutputName);
     xml->setAttribute ("midiControllerIn", midiControllerInputName);
     auto* folders = xml->createNewChildElement ("folders");
-    for (const auto& p : baseFolders)
-        folders->createNewChildElement ("folder")->setAttribute ("path", juce::String::fromUTF8 (p.string().c_str()));
+    for (const auto& folder : libraryFolders)
+    {
+        auto* el = folders->createNewChildElement ("folder");
+        el->setAttribute ("path", juce::String::fromUTF8 (folder.path.string().c_str()));
+        el->setAttribute ("enabled", folder.enabled);
+    }
     auto* fav = xml->createNewChildElement ("favorites");
     for (const auto& id : favoriteIds)
         fav->createNewChildElement ("id")->setAttribute ("v", id);
 
     f.getParentDirectory().createDirectory();
     xml->writeTo (f);
+}
+
+std::vector<std::filesystem::path> AppPreferences::enabledLibraryFolders() const
+{
+    std::vector<std::filesystem::path> out;
+    out.reserve (libraryFolders.size());
+    for (const auto& folder : libraryFolders)
+        if (folder.enabled)
+            out.push_back (folder.path);
+    return out;
 }
 
 } // namespace fmlib

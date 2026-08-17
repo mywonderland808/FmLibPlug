@@ -15,7 +15,8 @@ class MorpherPanel : public juce::Component,
                      private juce::Timer
 {
 public:
-    using MorphFn = std::function<void(const VoiceData&, bool dragEmit)>;
+    /** dragEmit: coalesced param stream. liveAllParams: stream locked-group changes even in freqOnly. */
+    using MorphFn = std::function<void(const VoiceData& voice, bool dragEmit, bool liveAllParams)>;
     using PersistFn = std::function<void()>;
     using SaveToDeviceSlotFn = std::function<void(const VoiceData& voice, int slot1to32)>;
 
@@ -52,6 +53,15 @@ public:
 
     void setLockRefPosition (float x, float y);
 
+    /** When true, LFO/pad morph emits are suppressed (paused after library click on Morph page). */
+    void setEgressPaused (bool paused);
+    bool isEgressPaused() const { return egressPaused; }
+    /** Clear pause and send the morph at the current pad position. */
+    void reemitCurrent();
+
+    /** Turn off Edge LFO and Note morph (mutually exclusive drivers stay off). */
+    void stopMotionDrivers();
+
     void setLfoEnabled (bool on);
     bool getLfoEnabled() const { return lfoEnabled; }
     /** Signed Hz; negative = CCW, positive = CW. Near-zero disables motion while toggle stays on. */
@@ -79,9 +89,11 @@ public:
     std::function<void()> onMorphInvalidate;
     /** Fired when Note morph Random/Edges becomes active — optional idle pad jump. */
     std::function<void()> onNoteJumpArmed;
+    /** Fired after a morph preset is applied from the list (session live again). */
+    std::function<void()> onPresetApplied;
     /**
-     * Fired when the user touches the pad directly (click or drag start), as opposed to
-     * an LFO step. Lets the host drop timing holds that would make the pad feel dead.
+     * Fired when morph should leave a library-audition pause: pad click/drag start,
+     * or turning Edge LFO / Note morph back on. Not fired on ordinary LFO ticks.
      */
     std::function<void()> onPadGestureStarted;
     std::function<void(int)> onRequestAssignCorner;
@@ -97,7 +109,11 @@ private:
 
     void updatePositionFromPoint (juce::Point<float> p);
     void tryEmitDrag();
-    void emitMorph (bool dragEmit);
+    void emitMorph (bool dragEmit, bool liveAllParams = false);
+    bool padContains (juce::Point<float> p) const;
+    void cancelPadGesture();
+    /** Unpause after a Morph-page library click (same path as using the pad). */
+    void resumeEgressIfPaused();
     void updateLockRefFromPoint (juce::Point<float> p);
     void commitLockRef();
     void drawPadCrosshair (juce::Graphics& g, float x, float y, juce::Colour colour) const;
@@ -123,6 +139,7 @@ private:
     void syncNoteJumpUi();
     void ensureTimerRunning();
     void advanceLfo (double deltaSeconds);
+    void updateMorphControlsEnabled();
     int effectiveEmitIntervalMs() const;
     static void edgePosition (float phase01, bool clockwise, float& x, float& y);
 
@@ -137,6 +154,7 @@ private:
     int emitIntervalMs = 150;
     bool padDragging = false;
     bool lockRefDragging = false;
+    bool padGesture = false;
     bool pendingMorph = false;
     bool suppressPresetAutoLoad = false;
     juce::Point<float> padDownPos;
@@ -145,6 +163,7 @@ private:
     uint32_t lockGroups = morphLockFactoryDefaults;
     uint32_t defaultLockGroups = morphLockFactoryDefaults;
     bool lfoEnabled = false;
+    bool egressPaused = false;
     float lfoRateHz = 0.25f;
     float lfoPhase = 0.0f;
     int lastLfoStep = -1;

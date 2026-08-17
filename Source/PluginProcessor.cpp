@@ -44,7 +44,7 @@ FmLibPlugAudioProcessor::~FmLibPlugAudioProcessor()
         midi.sendNoteOff (lastAuditionNote);
     midi.setSysexReceivedCallback (nullptr);
     midi.setStatusCallback (nullptr);
-    persistPreferences();
+    persistAllUserData();
     midi.close();
 }
 
@@ -104,7 +104,7 @@ void FmLibPlugAudioProcessor::setStateInformation (const void*, int)
 
 void FmLibPlugAudioProcessor::applyPreferencesToEngine()
 {
-    library.setBaseFolders (prefs.baseFolders);
+    library.setBaseFolders (prefs.enabledLibraryFolders());
     midi.setChannel (prefs.midiChannel);
     midi.setSysexPacingMs (prefs.sysexPacingMs);
     midi.setMorphReleaseGuardMs (prefs.morphReleaseGuardMs);
@@ -132,17 +132,37 @@ void FmLibPlugAudioProcessor::persistPreferences()
     prefs.midiOutputName = midi.getOutputName();
     prefs.midiChannel = midi.getChannel();
     prefs.sysexPacingMs = midi.getSysexPacingMs();
-    prefs.baseFolders = library.getBaseFolders();
     prefs.save();
+}
+
+void FmLibPlugAudioProcessor::persistTags()
+{
     tags.saveToFile (tagsFile());
+}
+
+void FmLibPlugAudioProcessor::persistMorphPresets()
+{
     morphPresets.saveToFile (morphPresetsFile());
+}
+
+void FmLibPlugAudioProcessor::persistAllUserData()
+{
+    persistPreferences();
+    persistTags();
+    persistMorphPresets();
 }
 
 void FmLibPlugAudioProcessor::sendVoice (const fmlib::VoiceData& voice)
 {
     const auto id = fmlib::contentIdFromVoice (voice);
     midi.sendVoice (voice);
+    lastEditBufferVoice = voice;
     recent.push (id);
+}
+
+void FmLibPlugAudioProcessor::rememberEditBufferVoice (const fmlib::VoiceData& voice)
+{
+    lastEditBufferVoice = voice;
 }
 
 void FmLibPlugAudioProcessor::auditionNote()
@@ -152,11 +172,35 @@ void FmLibPlugAudioProcessor::auditionNote()
 
 void FmLibPlugAudioProcessor::auditionNoteAfterDelay (int delayMs)
 {
+    auditionHoldActive = false;
     playHeldNoteAfterDelay (prefs.auditionNote, prefs.auditionVelocity, delayMs);
     pendingAutoOff = true;
     pendingAutoOffMs = juce::jmax (50, prefs.auditionDurationMs);
     if (delayMs <= 0 && lastAuditionNote >= 0)
         auditionOff.startTimer (pendingAutoOffMs);
+}
+
+void FmLibPlugAudioProcessor::auditionHoldStart (int delayMs)
+{
+    auditionOff.stopTimer();
+    auditionHoldActive = true;
+    playHeldNoteAfterDelay (prefs.auditionNote, prefs.auditionVelocity, delayMs);
+    pendingAutoOff = false;
+}
+
+void FmLibPlugAudioProcessor::auditionHoldStop()
+{
+    auditionOn.stopTimer();
+    auditionOff.stopTimer();
+    pendingNote = -1;
+    pendingAutoOff = false;
+    auditionHoldActive = false;
+    if (lastAuditionNote >= 0)
+    {
+        midi.sendNoteOff (lastAuditionNote);
+        lastAuditionNote = -1;
+        midi.syncNotesSounding (hasSoundingNotes());
+    }
 }
 
 void FmLibPlugAudioProcessor::playHeldNoteAfterDelay (int note, int velocity, int delayMs)

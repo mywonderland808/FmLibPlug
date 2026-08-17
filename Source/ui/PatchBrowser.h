@@ -30,9 +30,10 @@ public:
 
     void setEntries (std::vector<PatchEntry> entries, FavoritesStore* favorites, TagStore* tags = nullptr,
                      RecentStore* recent = nullptr);
-    /** Bank file view (true) vs single-voice files only (false). */
+    /** Bank file view (true) vs list mode (false): All or Single per setListViewContents. */
     void setBankFileView (bool banks);
-    void setGroupByBank (bool on);
+    /** 0 = All voices (flat), 1 = Single-voice SysEx only (when not in Bank view). */
+    void setListViewContents (int mode);
     void setShowFileColumns (bool on);
     void setHideDuplicates (bool on);
     void setTooltipsEnabled (bool on);
@@ -48,6 +49,11 @@ public:
     void setLoadCallback (LoadFn fn) { onLoad = std::move (fn); }
     void setFavoriteToggleCallback (FavFn fn) { onFav = std::move (fn); }
     void setBankFileViewChanged (std::function<void(bool)> fn) { onBankFileViewChanged = std::move (fn); }
+    void setOnAssignMorphCorner (std::function<void(int corner0to3, const PatchEntry&)> fn)
+    {
+        onAssignMorphCorner = std::move (fn);
+    }
+    void setOnAuditionVoice (std::function<void(const PatchEntry&)> fn) { onAuditionVoice = std::move (fn); }
     void setOnFavoritesOnlyChanged (std::function<void(bool)> fn) { onFavoritesOnlyChanged = std::move (fn); }
     void setOnTagFilterExpandedChanged (std::function<void(bool)> fn) { onTagFilterExpandedChanged = std::move (fn); }
     void setOnListFocused (std::function<void()> fn) { onListFocused = std::move (fn); }
@@ -77,11 +83,16 @@ private:
     void rebuildColumns();
     void updateStickyHeader();
     void updateBankChrome();
+    void updateListToggleUi();
+    void applyDefaultSortForCurrentView();
+    BrowserScope currentScope() const;
     void loadRow (int row, bool loadBank);
     bool toggleFavoriteOnSelection();
     int selectedVoiceRow() const;
     int nextSelectableRow (int from, int delta) const;
     bool moveSelectionBy (int delta);
+    bool handleJumpKey (const juce::KeyPress& key);
+    bool jumpKeysEnabled() const;
     void editTagsForRow (int row);
     void showVoiceContextMenu (int row);
     void showSearchFilterMenu();
@@ -131,15 +142,17 @@ private:
     TagStore* tagStore = nullptr;
     RecentStore* recentStore = nullptr;
     bool bankFileView = true;
-    bool groupByBank = true;
+    int listViewContents = 0; // 0 = All, 1 = Single SysEx
     bool showFileColumns = false;
     bool hideDuplicates = false;
     bool tooltipsEnabled = true;
-    int sortColumnId = 5; // Slot — natural 1..32 order in bank + group mode
+    int sortColumnId = 5; // Slot in Bank view; setBankFileView switches All/Single to Patch (2)
     bool sortForwards = true;
     LoadFn onLoad;
     FavFn onFav;
     std::function<void(bool)> onBankFileViewChanged;
+    std::function<void(int, const PatchEntry&)> onAssignMorphCorner;
+    std::function<void(const PatchEntry&)> onAuditionVoice;
     std::function<void(bool)> onFavoritesOnlyChanged;
     std::function<void(bool)> onTagFilterExpandedChanged;
     std::function<void()> onListFocused;
@@ -149,6 +162,8 @@ private:
     int lastSentRow = -1;
     /** Set when selection change already loaded; consumed by cellClicked to avoid double-send. */
     bool skipRedundantCellLoad = false;
+    /** Rebuild / silent reselect must not SysEx-load. */
+    bool suppressLoad = false;
     std::optional<PatchEntry> draggedVoice;
 };
 

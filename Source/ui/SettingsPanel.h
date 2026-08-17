@@ -1,5 +1,6 @@
 #pragma once
 
+#include "prefs/AppPreferences.h"
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <filesystem>
 #include <functional>
@@ -16,9 +17,12 @@ public:
     SettingsPanel();
 
     void setFolderPaths (const std::vector<std::filesystem::path>& paths);
+    void setLibraryFolders (const std::vector<LibraryFolder>& folders);
     std::vector<std::filesystem::path> getFolderPaths() const;
+    std::vector<LibraryFolder> getLibraryFolders() const;
     void addFolderPath (const juce::String& path);
     void removeSelectedFolder();
+    void toggleFolderEnabled (int row);
 
     void setMidiLists (const juce::StringArray& inputs, const juce::StringArray& outputs);
     juce::String getMidiIn() const { return midiIn.getText(); }
@@ -47,8 +51,12 @@ public:
 
     bool getDarkTheme() const { return dark.getToggleState(); }
     void setDarkTheme (bool d) { dark.setToggleState (d, juce::dontSendNotification); }
-    bool getGroupByBank() const { return groupByBank.getToggleState(); }
-    void setGroupByBank (bool v) { groupByBank.setToggleState (v, juce::dontSendNotification); }
+    /** 0 = All voices (flat), 1 = Single-voice SysEx only (non-Bank list button). */
+    int getListViewContents() const { return listViewContents.getSelectedItemIndex(); }
+    void setListViewContents (int index)
+    {
+        listViewContents.setSelectedItemIndex (juce::jlimit (0, 1, index), juce::dontSendNotification);
+    }
     bool getShowFileColumns() const { return showFileColumns.getToggleState(); }
     void setShowFileColumns (bool v) { showFileColumns.setToggleState (v, juce::dontSendNotification); }
     bool getHideDuplicates() const { return hideDuplicates.getToggleState(); }
@@ -81,12 +89,18 @@ public:
     ApplyFn onThemeChanged;
     ApplyFn onBrowserPrefsChanged;
     ApplyFn onMorphPrefsChanged;
+    /** Persist morph prefs after a slider drag ends. */
+    ApplyFn onMorphPrefsPersist;
     /** Channel / pacing only (does not reopen ports). */
     ApplyFn onMidiParamsChanged;
+    /** Persist MIDI params after a slider drag ends. */
+    ApplyFn onMidiParamsPersist;
     /** Apply MIDI device in/out and controller in from the current combo selections. */
     ApplyFn onApplyMidiPorts;
     ApplyFn onFoldersChanged;
     ApplyFn onAuditionChanged;
+    /** Persist audition prefs after a slider drag ends. */
+    ApplyFn onAuditionPersist;
     ApplyFn onTooltipsChanged;
 
 private:
@@ -118,7 +132,8 @@ private:
     juce::Slider channel, pacing, morphEmit, morphRelease, noteSettle, auditionNote, auditionVel, auditionMs;
 
     juce::ToggleButton dark { "Dark theme" };
-    juce::ToggleButton groupByBank { "Group bank voices by file headers" };
+    juce::Label listViewLabel { {}, "List button shows" };
+    juce::ComboBox listViewContents;
     juce::ToggleButton showFileColumns { "Show file / folder columns" };
     juce::ToggleButton hideDuplicates { "Hide duplicate voices" };
     juce::ToggleButton showTooltips { "Show tooltips" };
@@ -146,9 +161,10 @@ private:
         SettingsPanel* owner = nullptr;
         int getNumRows() override { return owner != nullptr ? static_cast<int> (owner->folders.size()) : 0; }
         void paintListBoxItem (int row, juce::Graphics& g, int w, int h, bool selected) override;
+        void listBoxItemClicked (int row, const juce::MouseEvent& e) override;
     } folderModel;
 
-    std::vector<juce::String> folders;
+    std::vector<LibraryFolder> folders;
     friend class FolderModel;
 };
 

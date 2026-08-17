@@ -16,7 +16,7 @@ TEST_CASE ("AppPreferences saveToFile loadFromFile round-trip", "[prefs]")
         AppPreferences prefs;
         prefs.darkTheme = false;
         prefs.bankFileView = false;
-        prefs.groupByBank = false;
+        prefs.listViewContents = 1;
         prefs.showFileColumns = true;
         prefs.hideDuplicates = true;
         prefs.showTooltips = false;
@@ -39,7 +39,7 @@ TEST_CASE ("AppPreferences saveToFile loadFromFile round-trip", "[prefs]")
         prefs.morphNoteJumpMode = 2;
         prefs.morphStreamMode = 0;
         prefs.midiControllerThru = true;
-        prefs.baseFolders = { "/tmp/a", "/tmp/b" };
+        prefs.libraryFolders = { { "/tmp/a", true }, { "/tmp/b", false } };
         prefs.favoriteIds.clear();
         prefs.favoriteIds.add ("99");
         prefs.favoriteIds.add ("1001");
@@ -51,7 +51,7 @@ TEST_CASE ("AppPreferences saveToFile loadFromFile round-trip", "[prefs]")
     loaded.loadFromFile (file);
     REQUIRE_FALSE (loaded.darkTheme);
     REQUIRE_FALSE (loaded.bankFileView);
-    REQUIRE_FALSE (loaded.groupByBank);
+    REQUIRE (loaded.listViewContents == 1);
     REQUIRE (loaded.showFileColumns);
     REQUIRE (loaded.hideDuplicates);
     REQUIRE_FALSE (loaded.showTooltips);
@@ -75,7 +75,12 @@ TEST_CASE ("AppPreferences saveToFile loadFromFile round-trip", "[prefs]")
     REQUIRE (loaded.morphNoteJumpMode == 2);
     REQUIRE (loaded.morphStreamMode == 0);
     REQUIRE (loaded.midiControllerThru);
-    REQUIRE (loaded.baseFolders.size() == 2);
+    REQUIRE (loaded.libraryFolders.size() == 2);
+    REQUIRE (loaded.libraryFolders[0].path == "/tmp/a");
+    REQUIRE (loaded.libraryFolders[0].enabled);
+    REQUIRE (loaded.libraryFolders[1].path == "/tmp/b");
+    REQUIRE_FALSE (loaded.libraryFolders[1].enabled);
+    REQUIRE (loaded.enabledLibraryFolders().size() == 1);
     REQUIRE (loaded.favoriteIds.size() == 2);
     REQUIRE (loaded.favoriteIds[0] == "99");
 
