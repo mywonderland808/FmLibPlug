@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-08-17
+
 ### Added
 - Settings **List button shows**: All voices (flat, including single-voice SysEx) or Single-voice SysEx only; Bank view always groups by bank file name
 - Library / device buffer context menu: **Set morph corner** (A–D) (does not load or pause morph) and **Audition** (loads, then timed note)
