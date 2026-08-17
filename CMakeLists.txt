@@ -213,6 +213,7 @@ if(FMLIBPLUG_BUILD_TESTS)
     Tests/unit/VoiceMorpherTests.cpp
     Tests/unit/MorphTransportTests.cpp
     Tests/unit/MorphPresetStoreTests.cpp
+    Tests/unit/AuditionHoldInputsTests.cpp
     Source/sysex/Dx7Formats.cpp
     Source/sysex/SysexParser.cpp
     Source/sysex/SysexMessages.cpp
