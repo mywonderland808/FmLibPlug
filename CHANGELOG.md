@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Dexed 128-byte packed singles and concatenated 1-voice SysEx parse as `bankSlot == -1` instead of a 32-voice bank.
+- Duplicate detection ignores unused MIDI bits on packed params as well as the voice name.
+
+### Changed
+- Duplicate detection hashes canonical packed voice parameters (ignores unused VCED bits and the 10-character name), so the same sound in another bank/slot is a dupe. Existing favorites/tags keyed to the old hash need a re-star / re-tag.
 
 ## [1.2.1] - 2026-08-17
 

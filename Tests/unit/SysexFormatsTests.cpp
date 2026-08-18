@@ -33,6 +33,28 @@ TEST_CASE ("contentIdFromVoice is stable and sensitive", "[sysex][formats]")
     REQUIRE (contentIdFromVoice (b) != idA);
 }
 
+TEST_CASE ("contentIdFromVoice ignores name and unused VCED bits", "[sysex][formats]")
+{
+    VoiceData a {};
+    a[0] = 10;
+    a[11] = 1; // left curve
+    a[145] = 'A';
+    a[146] = 'B';
+    const auto id = contentIdFromVoice (a);
+
+    VoiceData renamed = a;
+    renamed[145] = 'Z';
+    REQUIRE (contentIdFromVoice (renamed) == id);
+
+    VoiceData dirty = a;
+    dirty[11] = static_cast<uint8_t> (1 | 0x7c); // unused bits above 2-bit curve
+    REQUIRE (contentIdFromVoice (dirty) == id);
+
+    VoiceData highBit = a;
+    highBit[0] = static_cast<uint8_t> (10 | 0x80); // unused high bit on EG rate
+    REQUIRE (contentIdFromVoice (highBit) == id);
+}
+
 TEST_CASE ("packVoice / unpackVoice round-trip on unpacked image", "[sysex][formats]")
 {
     PackedVoice seed {};

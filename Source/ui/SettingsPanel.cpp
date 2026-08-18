@@ -105,7 +105,7 @@ SettingsPanel::SettingsPanel()
     listViewContents.setSelectedItemIndex (0, juce::dontSendNotification);
     listViewContents.setTooltip (listViewLabel.getTooltip());
     showFileColumns.setTooltip ("Show File and Folder columns in the patch list.");
-    hideDuplicates.setTooltip ("Hide byte-identical voices (keeps the first after the current column sort).");
+    hideDuplicates.setTooltip ("Hide voices with the same sound parameters (ignores the 10-character name and unused bits; keeps the first after the current column sort).");
     showTooltips.setTooltip ("Enable or disable tooltips across the UI.");
     showTooltips.setToggleState (true, juce::dontSendNotification);
     midiControllerThru.setTooltip ("Forward note/CC MIDI from the controller input to MIDI out (default off). When Note morph is Random/Edges, the first key of a phrase morphs then plays after a short SysEx lead-in. SysEx stays on the device input.");

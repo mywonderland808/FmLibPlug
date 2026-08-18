@@ -21,10 +21,13 @@ std::string voiceNameFromData (const VoiceData& voice)
 
 uint64_t contentIdFromVoice (const VoiceData& voice)
 {
+    // Canonical packed params (not raw VCED): unused bits and the 10-char name
+    // must not split copies of the same sound across banks/slots.
+    const auto packed = packVoice (voice);
     uint64_t hash = 14695981039346656037ull;
-    for (auto b : voice)
+    for (int i = 0; i < 118; ++i)
     {
-        hash ^= static_cast<uint64_t> (b);
+        hash ^= static_cast<uint64_t> (packed[static_cast<size_t> (i)] & 0x7f);
         hash *= 1099511628211ull;
     }
     return hash;
