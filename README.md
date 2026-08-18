@@ -8,13 +8,13 @@ Product name: **FmLibPlug**. Release notes: [CHANGELOG.md](CHANGELOG.md). Versio
 
 - Multi-folder recursive `.syx` / `.dx7` library (case-insensitive), background scan; Settings can enable/disable each folder
 - Voice names from SysEx + tooltips for file/path; optional file columns
-- Bank / All|Single views: Bank always groups by bank file; Settings chooses whether the list button is All voices (flat, including single SysEx) or Single-voice SysEx only; Left/Right prev/next bank or A–Z/digit group; load bank via double-click
+- Bank / All views: Bank groups by bank file; All is a flat list of every voice. Filter **`:singles`** for 1-voice SysEx (Yamaha 0x00 / Dexed 128-byte, including concatenated singles). Hide duplicates treats the same sound in another bank/slot as a dupe (name is ignored). Left/Right prev/next bank or A–Z/digit group; load bank via double-click
 - Hold **Audition** (or hold `A`) to play the configured audition note; release to stop
 - Context **Audition** loads the row then plays the Settings **Audition duration** note
 - Right-click selects (no SysEx); left-click loads. **Set morph corner** does not pause morph
 - Load **1 voice** (edit buffer) or **32-voice bank** via direct MIDI out; audition note
 - Get / receive dumps into a temporary device buffer; drag-drop bank edit; **Send** (1 voice or full 32-bank) / **Save...**
-- Favorites + search (`fav:` / `star:` / `tag:` / `dupe:` / `recent:` / AND/OR) + auto-tag (merge); click Tags to edit; Reset all tags in Settings
+- Favorites + search (`fav:` / `star:` / `tag:` / `dupe:` / `recent:` / `:singles` / AND/OR) + auto-tag (merge); click Tags to edit; Reset all tags in Settings
 - XY morpher (4 corners + morph presets; parameter locks; edge LFO; Note morph via controller MIDI in)
 - Morph while playing: frequency-only (default) or all-parameter streaming (see below)
 - Dark / light theme, hardware checklist in Settings; resizable editor

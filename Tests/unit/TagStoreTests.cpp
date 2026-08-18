@@ -3,6 +3,7 @@
 #include "library/FavoritesStore.h"
 #include "library/PatchEntry.h"
 #include <catch2/catch_test_macros.hpp>
+#include <vector>
 
 using namespace fmlib;
 
@@ -45,6 +46,16 @@ TEST_CASE ("TagStore allUniqueTags sorted and unique", "[library][tags]")
     REQUIRE (all[0] == "bass");
     REQUIRE (all[1] == "lead");
     REQUIRE (all[2] == "pad");
+}
+
+TEST_CASE ("TagStore stores single as a normal tag", "[library][tags]")
+{
+    TagStore store;
+    store.addTag (1, "single");
+    store.addTag (1, "bass");
+    REQUIRE (store.hasTag (1, "single"));
+    REQUIRE (store.getTags (1) == std::vector<std::string> { "single", "bass" });
+    REQUIRE (store.allUniqueTags() == std::vector<std::string> { "bass", "single" });
 }
 
 TEST_CASE ("LibraryFilter tag token", "[library][filter][tags]")

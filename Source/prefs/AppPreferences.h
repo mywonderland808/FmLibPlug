@@ -75,13 +75,8 @@ public:
     /** Forward controller MIDI (notes/CC) to MIDI out. Default off. */
     bool midiControllerThru = false;
     bool darkTheme = true;
-    /** Toolbar Bank vs List: true = bank files (slot 1..32), false = list mode below. */
+    /** Toolbar Bank vs All: true = grouped bank files (slot 1..32), false = flat list of every voice. */
     bool bankFileView = true;
-    /**
-     * When bankFileView is false: 0 = All voices (flat, including single SysEx and bank slots),
-     * 1 = Single-voice SysEx files only. Bank mode always groups by bank file name.
-     */
-    int listViewContents = 0;
     bool showFileColumns = false;
     bool hideDuplicates = false;
     bool showTooltips = true;

@@ -76,16 +76,7 @@ BrowserFilterResult BrowserList::filterForBrowser (const std::vector<PatchEntry>
 {
     auto inScope = [scope] (const PatchEntry& e)
     {
-        switch (scope)
-        {
-            case BrowserScope::bankFiles:
-                return isBankFileVoice (e);
-            case BrowserScope::allVoices:
-                return true;
-            case BrowserScope::singleSysex:
-                return ! isBankFileVoice (e);
-        }
-        return true;
+        return scope != BrowserScope::bankFiles || isBankFileVoice (e);
     };
 
     std::unordered_map<uint64_t, int> counts;

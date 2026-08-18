@@ -38,23 +38,6 @@ TEST_CASE ("BrowserList filterForBrowser counters bank view", "[library][browser
     REQUIRE (r.voices.size() == 2);
 }
 
-TEST_CASE ("BrowserList filterForBrowser counters single-sysex view", "[library][browser][stats]")
-{
-    FavoritesStore favs;
-    std::vector<PatchEntry> all {
-        makeVoice ("/a/bank.syx", 1, "A1", 1),
-        makeVoice ("/b/single.syx", -1, "Solo", 3),
-    };
-
-    const auto q = LibraryFilter::parse ("", false);
-    const auto r = BrowserList::filterForBrowser (all, BrowserScope::singleSysex, q, favs);
-
-    REQUIRE (r.stats.totalInScope == 1);
-    REQUIRE (r.stats.shown == 1);
-    REQUIRE (r.stats.duplicates == 0);
-    REQUIRE (r.voices.front().voiceName == "Solo");
-}
-
 TEST_CASE ("BrowserList filterForBrowser all voices includes banks and singles", "[library][browser][stats]")
 {
     FavoritesStore favs;
@@ -68,6 +51,23 @@ TEST_CASE ("BrowserList filterForBrowser all voices includes banks and singles",
 
     REQUIRE (r.stats.totalInScope == 2);
     REQUIRE (r.stats.shown == 2);
+}
+
+TEST_CASE ("BrowserList filterForBrowser :singles keeps 1-voice SysEx rows", "[library][browser][stats]")
+{
+    FavoritesStore favs;
+    std::vector<PatchEntry> all {
+        makeVoice ("/a/bank.syx", 1, "A1", 1),
+        makeVoice ("/b/single.syx", -1, "Solo", 3),
+    };
+
+    const auto q = LibraryFilter::parse (":singles", false);
+    const auto r = BrowserList::filterForBrowser (all, BrowserScope::allVoices, q, favs);
+
+    REQUIRE (r.stats.totalInScope == 2);
+    REQUIRE (r.stats.shown == 1);
+    REQUIRE (r.stats.duplicates == 0);
+    REQUIRE (r.voices.front().voiceName == "Solo");
 }
 
 TEST_CASE ("BrowserList filterForBrowser total survives move into apply", "[library][browser][stats]")

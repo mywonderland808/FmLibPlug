@@ -51,12 +51,6 @@ public:
 
     bool getDarkTheme() const { return dark.getToggleState(); }
     void setDarkTheme (bool d) { dark.setToggleState (d, juce::dontSendNotification); }
-    /** 0 = All voices (flat), 1 = Single-voice SysEx only (non-Bank list button). */
-    int getListViewContents() const { return listViewContents.getSelectedItemIndex(); }
-    void setListViewContents (int index)
-    {
-        listViewContents.setSelectedItemIndex (juce::jlimit (0, 1, index), juce::dontSendNotification);
-    }
     bool getShowFileColumns() const { return showFileColumns.getToggleState(); }
     void setShowFileColumns (bool v) { showFileColumns.setToggleState (v, juce::dontSendNotification); }
     bool getHideDuplicates() const { return hideDuplicates.getToggleState(); }
@@ -132,8 +126,6 @@ private:
     juce::Slider channel, pacing, morphEmit, morphRelease, noteSettle, auditionNote, auditionVel, auditionMs;
 
     juce::ToggleButton dark { "Dark theme" };
-    juce::Label listViewLabel { {}, "List button shows" };
-    juce::ComboBox listViewContents;
     juce::ToggleButton showFileColumns { "Show file / folder columns" };
     juce::ToggleButton hideDuplicates { "Hide duplicate voices" };
     juce::ToggleButton showTooltips { "Show tooltips" };

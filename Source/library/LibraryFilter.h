@@ -13,7 +13,7 @@ namespace fmlib
 /** One atomic condition in a filter expression. */
 struct LibraryFilterAtom
 {
-    enum class Kind { text, tag, favorites, duplicates, recent };
+    enum class Kind { text, tag, favorites, duplicates, recent, singles };
     Kind kind = Kind::text;
     std::string value; // lowercased (text/tag only)
 };
@@ -32,6 +32,7 @@ struct LibraryFilterAndGroup
  *   tag:bass AND dark
  *   tag:pad OR tag:string
  *   dupe: OR fav:
+ *   :singles
  * Operators are uppercase only: AND / OR (lowercase "and"/"or" are normal search text).
  * Trailing AND/OR is ignored so the preceding clause still filters.
  */
@@ -46,6 +47,24 @@ struct LibraryFilterQuery
 
     /** OR of AND-groups. Empty means no expression constraint. */
     std::vector<LibraryFilterAndGroup> orGroups;
+
+    bool hasTag (const std::string& name) const
+    {
+        for (const auto& g : orGroups)
+            for (const auto& a : g.atoms)
+                if (a.kind == LibraryFilterAtom::Kind::tag && a.value == name)
+                    return true;
+        return false;
+    }
+
+    bool hasSingles() const
+    {
+        for (const auto& g : orGroups)
+            for (const auto& a : g.atoms)
+                if (a.kind == LibraryFilterAtom::Kind::singles)
+                    return true;
+        return false;
+    }
 };
 
 class LibraryFilter

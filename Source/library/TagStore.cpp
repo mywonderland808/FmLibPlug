@@ -14,7 +14,9 @@ void TagStore::setTags (uint64_t contentId, std::vector<std::string> tags)
 {
     for (auto& t : tags)
         t = asciiLower (std::move (t));
-    tags.erase (std::remove_if (tags.begin(), tags.end(), [] (const std::string& t) { return t.empty(); }), tags.end());
+    tags.erase (std::remove_if (tags.begin(), tags.end(),
+                                [] (const std::string& t) { return t.empty(); }),
+                tags.end());
     if (tags.empty())
         tagsById.erase (contentId);
     else

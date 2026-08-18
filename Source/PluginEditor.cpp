@@ -139,7 +139,6 @@ FmLibPlugAudioProcessorEditor::FmLibPlugAudioProcessorEditor (FmLibPlugAudioProc
     devicePanel.onQueryDragVoice = [this] { return browser.getDraggedVoice(); };
 
     browser.setBankFileView (plugin.prefs.bankFileView);
-    browser.setListViewContents (plugin.prefs.listViewContents);
     browser.setShowFileColumns (plugin.prefs.showFileColumns);
     browser.setHideDuplicates (plugin.prefs.hideDuplicates);
     browser.setTooltipsEnabled (plugin.prefs.showTooltips);
@@ -327,10 +326,8 @@ FmLibPlugAudioProcessorEditor::FmLibPlugAudioProcessorEditor (FmLibPlugAudioProc
     };
     settings.onBrowserPrefsChanged = [this]
     {
-        plugin.prefs.listViewContents = settings.getListViewContents();
         plugin.prefs.showFileColumns = settings.getShowFileColumns();
         plugin.prefs.hideDuplicates = settings.getHideDuplicates();
-        browser.setListViewContents (plugin.prefs.listViewContents);
         browser.setShowFileColumns (plugin.prefs.showFileColumns);
         browser.setHideDuplicates (plugin.prefs.hideDuplicates);
         plugin.persistPreferences();
@@ -424,7 +421,6 @@ FmLibPlugAudioProcessorEditor::FmLibPlugAudioProcessorEditor (FmLibPlugAudioProc
     settings.setMorphStreamMode (plugin.prefs.morphStreamMode);
     settings.setMidiControllerThru (plugin.prefs.midiControllerThru);
     settings.setDarkTheme (plugin.prefs.darkTheme);
-    settings.setListViewContents (plugin.prefs.listViewContents);
     settings.setShowFileColumns (plugin.prefs.showFileColumns);
     settings.setHideDuplicates (plugin.prefs.hideDuplicates);
     settings.setTooltipsEnabled (plugin.prefs.showTooltips);
@@ -882,7 +878,6 @@ void FmLibPlugAudioProcessorEditor::refreshLibraryView()
     auto entries = plugin.library.getEntriesCopy();
     browser.setEntries (std::move (entries), &plugin.favorites, &plugin.tags, &plugin.recent);
     browser.setBankFileView (plugin.prefs.bankFileView);
-    browser.setListViewContents (plugin.prefs.listViewContents);
     browser.setShowFileColumns (plugin.prefs.showFileColumns);
     browser.setHideDuplicates (plugin.prefs.hideDuplicates);
     browser.setTooltipsEnabled (plugin.prefs.showTooltips);

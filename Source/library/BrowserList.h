@@ -48,8 +48,7 @@ struct BrowserFilterResult
 enum class BrowserScope
 {
     bankFiles,     // bankSlot > 0 only (always grouped by file in the UI)
-    allVoices,     // every voice, flat
-    singleSysex    // bankSlot <= 0 only
+    allVoices      // every voice, flat
 };
 
 /** Pure list helpers for bank-aware browsing (Catch2-tested). */
@@ -72,7 +71,7 @@ public:
                                                  const TagStore* tags = nullptr,
                                                  const std::unordered_set<uint64_t>* recentIds = nullptr);
 
-    static bool isBankFileVoice (const PatchEntry& e) { return e.bankSlot > 0; }
+    static bool isBankFileVoice (const PatchEntry& e) { return fmlib::isBankFileVoice (e); }
     static int countVoiceRows (const std::vector<BrowserRow>& rows);
 
     /** Index into `rows` of the first voice of the previous/next bank. nullopt at ends. */

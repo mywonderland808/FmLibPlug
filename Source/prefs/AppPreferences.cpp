@@ -39,11 +39,6 @@ void AppPreferences::loadFromFile (const juce::File& f)
     {
         darkTheme = xml->getBoolAttribute ("dark", true);
         bankFileView = xml->getBoolAttribute ("bankFileView", true);
-        if (xml->hasAttribute ("listViewContents"))
-            listViewContents = juce::jlimit (0, 1, xml->getIntAttribute ("listViewContents", 0));
-        else
-            // Former groupByBank only affected Bank headers; List defaults to all voices.
-            listViewContents = 0;
         showFileColumns = xml->getBoolAttribute ("showFileColumns", false);
         hideDuplicates = xml->getBoolAttribute ("hideDuplicates", false);
         showTooltips = xml->getBoolAttribute ("showTooltips", true);
@@ -134,7 +129,6 @@ void AppPreferences::saveToFile (const juce::File& f) const
     auto xml = std::make_unique<juce::XmlElement> ("FmLibPlugSettings");
     xml->setAttribute ("dark", darkTheme);
     xml->setAttribute ("bankFileView", bankFileView);
-    xml->setAttribute ("listViewContents", listViewContents);
     xml->setAttribute ("showFileColumns", showFileColumns);
     xml->setAttribute ("hideDuplicates", hideDuplicates);
     xml->setAttribute ("showTooltips", showTooltips);

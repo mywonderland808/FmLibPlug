@@ -54,8 +54,6 @@ SettingsPanel::SettingsPanel()
     addAndMakeVisible (auditionVel);
     addAndMakeVisible (auditionMs);
     addAndMakeVisible (dark);
-    addAndMakeVisible (listViewLabel);
-    addAndMakeVisible (listViewContents);
     addAndMakeVisible (showFileColumns);
     addAndMakeVisible (hideDuplicates);
     addAndMakeVisible (showTooltips);
@@ -96,14 +94,6 @@ SettingsPanel::SettingsPanel()
     setupSlider (auditionMs, 50, 2000, 10, " ms");
 
     dark.setTooltip ("Switch between dark and light UI colours.");
-    listViewLabel.setTooltip (
-        "What the non-Bank toolbar button shows. All voices = flat list of every preset, including "
-        "single-voice SysEx and bank-file voices. Single-voice SysEx only = true one-voice files. "
-        "Bank mode always groups by bank file name.");
-    listViewContents.addItem ("All voices (flat)", 1);
-    listViewContents.addItem ("Single-voice SysEx only", 2);
-    listViewContents.setSelectedItemIndex (0, juce::dontSendNotification);
-    listViewContents.setTooltip (listViewLabel.getTooltip());
     showFileColumns.setTooltip ("Show File and Folder columns in the patch list.");
     hideDuplicates.setTooltip ("Hide voices with the same sound parameters (ignores the 10-character name and unused bits; keeps the first after the current column sort).");
     showTooltips.setTooltip ("Enable or disable tooltips across the UI.");
@@ -160,7 +150,6 @@ SettingsPanel::SettingsPanel()
     resetTags.onClick = [this] { if (onResetTags) onResetTags(); };
     resetDefaults.onClick = [this] { resetNonMidiDefaults(); };
     dark.onClick = [this] { if (onThemeChanged) onThemeChanged(); };
-    listViewContents.onChange = [this] { if (onBrowserPrefsChanged) onBrowserPrefsChanged(); };
     showFileColumns.onClick = [this] { if (onBrowserPrefsChanged) onBrowserPrefsChanged(); };
     hideDuplicates.onClick = [this] { if (onBrowserPrefsChanged) onBrowserPrefsChanged(); };
     showTooltips.onClick = [this] { if (onTooltipsChanged) onTooltipsChanged(); };
@@ -226,7 +215,6 @@ void SettingsPanel::resetNonMidiDefaults()
     auditionVel.setValue (def.auditionVelocity, juce::dontSendNotification);
     auditionMs.setValue (def.auditionDurationMs, juce::dontSendNotification);
     dark.setToggleState (def.darkTheme, juce::dontSendNotification);
-    listViewContents.setSelectedItemIndex (def.listViewContents, juce::dontSendNotification);
     showFileColumns.setToggleState (def.showFileColumns, juce::dontSendNotification);
     hideDuplicates.setToggleState (def.hideDuplicates, juce::dontSendNotification);
     showTooltips.setToggleState (def.showTooltips, juce::dontSendNotification);
@@ -265,8 +253,7 @@ void SettingsPanel::applyThemeColours (bool darkTheme)
     checklist.setColour (juce::Label::textColourId, p.text);
     foldersLabel.setColour (juce::Label::textColourId, p.text);
     for (auto* l : { &midiInLabel, &midiControllerLabel, &midiOutLabel, &channelLabel, &pacingLabel, &morphEmitLabel,
-                     &morphReleaseLabel, &noteSettleLabel, &morphStreamLabel, &noteLabel, &velLabel, &durLabel,
-                     &listViewLabel })
+                     &morphReleaseLabel, &noteSettleLabel, &morphStreamLabel, &noteLabel, &velLabel, &durLabel })
         l->setColour (juce::Label::textColourId, p.text);
 
     for (auto* t : { &dark, &showFileColumns, &hideDuplicates, &showTooltips,
@@ -286,7 +273,6 @@ void SettingsPanel::applyThemeColours (bool darkTheme)
     paintCombo (midiControllerIn);
     paintCombo (midiOut);
     paintCombo (morphStream);
-    paintCombo (listViewContents);
 
     auto paintSlider = [&] (juce::Slider& s)
     {
@@ -465,13 +451,8 @@ void SettingsPanel::resized()
     layoutLabeled (r, durLabel, auditionMs);
 
     r.removeFromTop (6);
-    auto toggles = r.removeFromTop (168);
+    auto toggles = r.removeFromTop (140);
     dark.setBounds (toggles.removeFromTop (24));
-    {
-        auto listRow = toggles.removeFromTop (28);
-        listViewLabel.setBounds (listRow.removeFromLeft (140));
-        listViewContents.setBounds (listRow.reduced (2));
-    }
     showFileColumns.setBounds (toggles.removeFromTop (24));
     hideDuplicates.setBounds (toggles.removeFromTop (24));
     showTooltips.setBounds (toggles.removeFromTop (24));

@@ -30,10 +30,8 @@ public:
 
     void setEntries (std::vector<PatchEntry> entries, FavoritesStore* favorites, TagStore* tags = nullptr,
                      RecentStore* recent = nullptr);
-    /** Bank file view (true) vs list mode (false): All or Single per setListViewContents. */
+    /** Bank file view (true) vs All voices flat (false). */
     void setBankFileView (bool banks);
-    /** 0 = All voices (flat), 1 = Single-voice SysEx only (when not in Bank view). */
-    void setListViewContents (int mode);
     void setShowFileColumns (bool on);
     void setHideDuplicates (bool on);
     void setTooltipsEnabled (bool on);
@@ -103,6 +101,8 @@ private:
     /** Lay out tag chips for width; updates tagStrip size. */
     void rebuildTagStripButtons (int forWidth = 0);
     void updateTagFilterHeader();
+    std::vector<std::string> tagFilterCatalog() const;
+    std::vector<std::string> tagsForDisplay (const PatchEntry& e) const;
     /** Returns tag name under local cell point, or empty if none. */
     std::string tagAtCellPoint (int row, int width, int height, juce::Point<float> local) const;
     void applyColumnSort (std::vector<PatchEntry>& voices, bool keepBankGroups) const;
@@ -142,11 +142,10 @@ private:
     TagStore* tagStore = nullptr;
     RecentStore* recentStore = nullptr;
     bool bankFileView = true;
-    int listViewContents = 0; // 0 = All, 1 = Single SysEx
     bool showFileColumns = false;
     bool hideDuplicates = false;
     bool tooltipsEnabled = true;
-    int sortColumnId = 5; // Slot in Bank view; setBankFileView switches All/Single to Patch (2)
+    int sortColumnId = 5; // Slot in Bank view; setBankFileView switches All to Patch (2)
     bool sortForwards = true;
     LoadFn onLoad;
     FavFn onFav;

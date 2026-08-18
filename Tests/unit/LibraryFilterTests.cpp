@@ -247,3 +247,51 @@ TEST_CASE ("LibraryFilter toggleAndTagToken", "[library][filter][tags]")
                  "tag:warm AND tag:keys OR tag:soft AND tag:keys", "keys", Combine::withAnd)
              == "tag:warm OR tag:soft");
 }
+
+TEST_CASE ("LibraryFilter :singles matches 1-voice SysEx rows", "[library][filter]")
+{
+    FavoritesStore favs;
+    TagStore tags;
+    tags.addTag (1, "single"); // a user tag named single is unrelated
+
+    PatchEntry bank;
+    bank.voiceName = "FromBank";
+    bank.fileName = "bank.syx";
+    bank.bankSlot = 3;
+    bank.contentId = 1;
+    bank.refreshSearchCache();
+
+    PatchEntry solo;
+    solo.voiceName = "Solo";
+    solo.fileName = "solo.syx";
+    solo.bankSlot = -1;
+    solo.contentId = 2;
+    solo.refreshSearchCache();
+
+    PatchEntry concat;
+    concat.voiceName = "PackedIn";
+    concat.fileName = "many-singles.syx";
+    concat.bankSlot = -1;
+    concat.contentId = 3;
+    concat.refreshSearchCache();
+
+    std::vector<PatchEntry> all { bank, solo, concat };
+
+    const auto q = LibraryFilter::parse (":singles", false);
+    REQUIRE (q.hasSingles());
+    REQUIRE_FALSE (q.hasTag ("single"));
+    REQUIRE (q.orGroups[0].atoms[0].kind == LibraryFilterAtom::Kind::singles);
+
+    const auto out = LibraryFilter::apply (all, q, favs, &tags);
+    REQUIRE (out.size() == 2);
+    REQUIRE (out[0].voiceName == "Solo");
+    REQUIRE (out[1].voiceName == "PackedIn");
+    REQUIRE (LibraryFilter::apply (all, q, favs, nullptr).size() == 2);
+
+    REQUIRE (LibraryFilter::parse ("singles:", false).hasSingles());
+    REQUIRE (LibraryFilter::parse (":single", false).hasSingles());
+    REQUIRE_FALSE (LibraryFilter::parse ("tag:single", false).hasSingles());
+    REQUIRE (LibraryFilter::apply (all, LibraryFilter::parse ("tag:single", false), favs, &tags).size() == 1);
+    REQUIRE (LibraryFilter::apply (all, LibraryFilter::parse ("tag:single", false), favs, &tags).front().voiceName
+             == "FromBank");
+}

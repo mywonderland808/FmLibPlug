@@ -118,6 +118,11 @@ LibraryFilterAndGroup parseAndGroup (const std::string& clause)
                 flushText();
                 g.atoms.push_back ({ LibraryFilterAtom::Kind::recent, {} });
             }
+            else if (low == ":singles" || low == "singles:" || low == ":single" || low == "single:")
+            {
+                flushText();
+                g.atoms.push_back ({ LibraryFilterAtom::Kind::singles, {} });
+            }
             else if (low.rfind ("tag:", 0) == 0)
             {
                 flushText();
@@ -154,6 +159,8 @@ bool atomMatches (const LibraryFilterAtom& atom,
             return dupeIds != nullptr && dupeIds->count (e.contentId) > 0;
         case LibraryFilterAtom::Kind::recent:
             return recentIds != nullptr && recentIds->count (e.contentId) > 0;
+        case LibraryFilterAtom::Kind::singles:
+            return isSingleVoiceFile (e);
         case LibraryFilterAtom::Kind::tag:
             if (atom.value.empty())
                 return true;
@@ -225,6 +232,9 @@ std::vector<PatchEntry> LibraryFilter::apply (std::vector<PatchEntry> all,
                                               const TagStore* tags,
                                               const std::unordered_set<uint64_t>* recentIds)
 {
+    if (query.orGroups.empty() && ! query.favoritesOnly && ! query.duplicatesOnly)
+        return all;
+
     std::unordered_set<uint64_t> dupeIds;
     if (query.duplicatesOnly)
     {
@@ -346,6 +356,7 @@ std::string LibraryFilter::toggleAndTagToken (const std::string& query, const st
             case LibraryFilterAtom::Kind::favorites: body += "fav:"; break;
             case LibraryFilterAtom::Kind::duplicates: body += "dupe:"; break;
             case LibraryFilterAtom::Kind::recent: body += "recent:"; break;
+            case LibraryFilterAtom::Kind::singles: body += ":singles"; break;
             case LibraryFilterAtom::Kind::text:
             default: body += a.value; break;
         }

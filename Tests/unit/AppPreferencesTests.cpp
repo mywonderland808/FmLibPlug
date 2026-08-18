@@ -16,7 +16,6 @@ TEST_CASE ("AppPreferences saveToFile loadFromFile round-trip", "[prefs]")
         AppPreferences prefs;
         prefs.darkTheme = false;
         prefs.bankFileView = false;
-        prefs.listViewContents = 1;
         prefs.showFileColumns = true;
         prefs.hideDuplicates = true;
         prefs.showTooltips = false;
@@ -51,7 +50,6 @@ TEST_CASE ("AppPreferences saveToFile loadFromFile round-trip", "[prefs]")
     loaded.loadFromFile (file);
     REQUIRE_FALSE (loaded.darkTheme);
     REQUIRE_FALSE (loaded.bankFileView);
-    REQUIRE (loaded.listViewContents == 1);
     REQUIRE (loaded.showFileColumns);
     REQUIRE (loaded.hideDuplicates);
     REQUIRE_FALSE (loaded.showTooltips);

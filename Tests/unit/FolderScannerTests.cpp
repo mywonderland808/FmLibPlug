@@ -30,6 +30,7 @@ TEST_CASE ("FolderScanner finds syx and skips others", "[library][scanner]")
     REQUIRE (result.voicesFound >= 1);
     REQUIRE_FALSE (result.entries.empty());
     REQUIRE (result.entries.front().fileName.find ("keep") != std::string::npos);
+    REQUIRE (isSingleVoiceFile (result.entries.front()));
 
     fs::remove_all (root);
 }

@@ -27,4 +27,10 @@ struct PatchEntry
     void refreshSearchCache();
 };
 
+/** True when the row came from a multi-voice bank dump (slot 1..32). */
+inline bool isBankFileVoice (const PatchEntry& e) { return e.bankSlot > 0; }
+
+/** Voice from a 1-voice SysEx (format 0x00 / Dexed 128-byte), including concatenated singles. */
+inline bool isSingleVoiceFile (const PatchEntry& e) { return e.bankSlot <= 0; }
+
 } // namespace fmlib

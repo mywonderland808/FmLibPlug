@@ -6,6 +6,7 @@
 #include <cmath>
 #include <filesystem>
 #include <iterator>
+#include <numeric>
 #include <unordered_set>
 
 namespace fmlib
@@ -172,23 +173,6 @@ void PatchBrowser::setBankFileView (bool banks)
     rebuildFiltered();
 }
 
-void PatchBrowser::setListViewContents (int mode)
-{
-    const int next = juce::jlimit (0, 1, mode);
-    if (listViewContents == next)
-    {
-        updateListToggleUi();
-        return;
-    }
-    listViewContents = next;
-    updateListToggleUi();
-    if (! bankFileView)
-    {
-        applyDefaultSortForCurrentView();
-        rebuildFiltered();
-    }
-}
-
 void PatchBrowser::setShowFileColumns (bool on)
 {
     if (showFileColumns == on)
@@ -226,32 +210,23 @@ void PatchBrowser::updateListToggleUi()
         groupToggle.setTooltip (
             "Bank view: voices from multi-voice bank files, always sorted and grouped by bank file name.");
     }
-    else if (listViewContents == 0)
+    else
     {
         groupToggle.setButtonText ("All");
         groupToggle.setTooltip (
-            "All view: every library preset in a flat list, including single-voice SysEx files and "
-            "voices from bank files. Switch to Bank for grouped bank files.");
-    }
-    else
-    {
-        groupToggle.setButtonText ("Single");
-        groupToggle.setTooltip (
-            "Single view: only single-voice SysEx files (not voices from bank dumps). "
-            "Change List contents in Settings to show All voices instead.");
+            "All view: every library preset in a flat list, including 1-voice SysEx and "
+            "voices from bank files. Filter :singles for 1-voice SysEx (not bank slots). Switch to Bank for grouped banks.");
     }
 }
 
 BrowserScope PatchBrowser::currentScope() const
 {
-    if (bankFileView)
-        return BrowserScope::bankFiles;
-    return listViewContents == 0 ? BrowserScope::allVoices : BrowserScope::singleSysex;
+    return bankFileView ? BrowserScope::bankFiles : BrowserScope::allVoices;
 }
 
 void PatchBrowser::applyDefaultSortForCurrentView()
 {
-    // Bank: slot order. All and Single: Patch name (A-Z jump + browsing).
+    // Bank: slot order. All: Patch name (A-Z jump + browsing).
     sortColumnId = bankFileView ? 5 : 2;
     sortForwards = true;
     table.getHeader().setSortColumnId (sortColumnId, sortForwards);
@@ -303,8 +278,10 @@ void PatchBrowser::setEntries (std::vector<PatchEntry> entries, FavoritesStore* 
 {
     all = std::move (entries);
     for (auto& e : all)
-        if (e.voiceNameLower.empty())
+    {
+        if (e.voiceNameLower.empty() || e.nameSortKey.empty())
             e.refreshSearchCache();
+    }
     favStore = favorites;
     tagStore = tags;
     recentStore = recent;
@@ -325,7 +302,7 @@ void PatchBrowser::resized()
 {
     auto r = getLocalBounds().reduced (4);
     auto top = r.removeFromTop (28);
-    // Always reserve bank-nav width so Single mode does not reflow the search row.
+    // Always reserve bank-nav width so All mode does not reflow the search row.
     nextBank.setBounds (top.removeFromRight (64).reduced (1));
     prevBank.setBounds (top.removeFromRight (64).reduced (1));
     groupToggle.setBounds (top.removeFromRight (72));
@@ -379,7 +356,7 @@ void PatchBrowser::resized()
             r.removeFromTop (4);
     }
 
-    // Always reserve sticky-header height so Bank <-> Single does not reflow the table.
+    // Always reserve sticky-header height so Bank <-> All does not reflow the table.
     auto stickyArea = r.removeFromTop (24);
     r.removeFromTop (2);
     stickyBank.setBounds (stickyArea);
@@ -387,14 +364,19 @@ void PatchBrowser::resized()
     table.setBounds (r);
 }
 
+std::vector<std::string> PatchBrowser::tagFilterCatalog() const
+{
+    return tagStore != nullptr ? tagStore->allUniqueTags() : std::vector<std::string> {};
+}
+
+std::vector<std::string> PatchBrowser::tagsForDisplay (const PatchEntry& e) const
+{
+    return tagStore != nullptr ? tagStore->getTags (e.contentId) : std::vector<std::string> {};
+}
+
 void PatchBrowser::refreshTagStrip()
 {
-    // Runs on the collapsed path too, where rebuildTagStripButtons never fires:
-    // without this the Show Tags toggle would stay hidden once tags exist.
-    if (tagStore == nullptr)
-        tagFilterHasCatalog = false;
-    else
-        tagFilterHasCatalog = ! tagStore->allUniqueTags().empty();
+    tagFilterHasCatalog = ! tagFilterCatalog().empty();
 
     updateTagFilterHeader();
     resized();
@@ -437,14 +419,7 @@ void PatchBrowser::rebuildTagStripButtons (int forWidth)
     tagStripButtons.clear();
     tagStrip.removeAllChildren();
 
-    if (tagStore == nullptr)
-    {
-        tagFilterHasCatalog = false;
-        tagStrip.setSize (0, 0);
-        return;
-    }
-
-    const auto catalog = tagStore->allUniqueTags();
+    const auto catalog = tagFilterCatalog();
     tagFilterHasCatalog = ! catalog.empty();
     if (! tagFilterHasCatalog)
     {
@@ -671,10 +646,9 @@ void PatchBrowser::timerCallback()
 
 int PatchBrowser::compareEntries (const PatchEntry& a, const PatchEntry& b) const
 {
-    auto nameOf = [] (const PatchEntry& e)
+    auto nameOf = [] (const PatchEntry& e) -> const std::string&
     {
-        // Same buckets as A-Z jumps: letters A-Z, everything else one group.
-        return BrowserList::nameSortKey (e.voiceName);
+        return e.nameSortKey;
     };
     auto fileOf = [] (const PatchEntry& e) -> const std::string&
     {
@@ -686,9 +660,7 @@ int PatchBrowser::compareEntries (const PatchEntry& a, const PatchEntry& b) cons
     };
     auto tagsOf = [this] (const PatchEntry& e) -> std::string
     {
-        if (tagStore == nullptr)
-            return {};
-        const auto tags = tagStore->getTags (e.contentId);
+        const auto tags = tagsForDisplay (e);
         std::string s;
         for (size_t i = 0; i < tags.size(); ++i)
         {
@@ -752,9 +724,9 @@ int PatchBrowser::compareEntries (const PatchEntry& a, const PatchEntry& b) cons
         return -1;
     if (nameOf (b) < nameOf (a))
         return 1;
-    if (a.absolutePath.string() < b.absolutePath.string())
+    if (a.absolutePath < b.absolutePath)
         return -1;
-    if (b.absolutePath.string() < a.absolutePath.string())
+    if (b.absolutePath < a.absolutePath)
         return 1;
     if (a.bankSlot < b.bankSlot)
         return -1;
@@ -765,6 +737,9 @@ int PatchBrowser::compareEntries (const PatchEntry& a, const PatchEntry& b) cons
 
 void PatchBrowser::applyColumnSort (std::vector<PatchEntry>& voices, bool keepBankGroups) const
 {
+    if (voices.size() < 2)
+        return;
+
     const bool fwd = sortForwards;
     auto less = [this, fwd] (const PatchEntry& a, const PatchEntry& b)
     {
@@ -774,56 +749,66 @@ void PatchBrowser::applyColumnSort (std::vector<PatchEntry>& voices, bool keepBa
         return fwd ? (c < 0) : (c > 0);
     };
 
+    std::vector<size_t> order (voices.size());
+    std::iota (order.begin(), order.end(), 0);
+
+    auto applyOrder = [&voices] (std::vector<size_t>& idx)
+    {
+        std::vector<PatchEntry> next;
+        next.reserve (idx.size());
+        for (auto i : idx)
+            next.push_back (std::move (voices[i]));
+        voices = std::move (next);
+    };
+
     if (! keepBankGroups)
     {
-        std::stable_sort (voices.begin(), voices.end(), less);
+        std::stable_sort (order.begin(), order.end(), [&] (size_t i, size_t j)
+        {
+            return less (voices[i], voices[j]);
+        });
+        applyOrder (order);
         return;
     }
 
     // Keep voices from the same bank file together; sort within each bank, then
     // order banks by the sort key of their first voice (except Slot — keep file order).
-    std::stable_sort (voices.begin(), voices.end(), [] (const PatchEntry& a, const PatchEntry& b)
+    std::stable_sort (order.begin(), order.end(), [&] (size_t i, size_t j)
     {
-        if (a.absolutePath != b.absolutePath)
-            return a.absolutePath.string() < b.absolutePath.string();
-        return false;
+        return voices[i].absolutePath < voices[j].absolutePath;
     });
 
+    std::vector<std::pair<size_t, size_t>> groups;
     size_t i = 0;
-    while (i < voices.size())
+    while (i < order.size())
     {
         size_t j = i + 1;
-        while (j < voices.size() && voices[j].absolutePath == voices[i].absolutePath)
+        while (j < order.size() && voices[order[j]].absolutePath == voices[order[i]].absolutePath)
             ++j;
-        std::stable_sort (voices.begin() + static_cast<std::ptrdiff_t> (i),
-                          voices.begin() + static_cast<std::ptrdiff_t> (j),
-                          less);
+        std::stable_sort (order.begin() + static_cast<std::ptrdiff_t> (i),
+                          order.begin() + static_cast<std::ptrdiff_t> (j),
+                          [&] (size_t a, size_t b) { return less (voices[a], voices[b]); });
+        groups.emplace_back (i, j);
         i = j;
     }
 
-    if (sortColumnId == 5)
-        return;
-
-    std::vector<std::vector<PatchEntry>> groups;
-    i = 0;
-    while (i < voices.size())
+    if (sortColumnId != 5)
     {
-        size_t j = i + 1;
-        while (j < voices.size() && voices[j].absolutePath == voices[i].absolutePath)
-            ++j;
-        groups.emplace_back (voices.begin() + static_cast<std::ptrdiff_t> (i),
-                             voices.begin() + static_cast<std::ptrdiff_t> (j));
-        i = j;
+        std::stable_sort (groups.begin(), groups.end(), [&] (const std::pair<size_t, size_t>& ga,
+                                                             const std::pair<size_t, size_t>& gb)
+        {
+            return less (voices[order[ga.first]], voices[order[gb.first]]);
+        });
+        std::vector<size_t> flattened;
+        flattened.reserve (order.size());
+        for (const auto& g : groups)
+            flattened.insert (flattened.end(),
+                              order.begin() + static_cast<std::ptrdiff_t> (g.first),
+                              order.begin() + static_cast<std::ptrdiff_t> (g.second));
+        order.swap (flattened);
     }
 
-    std::stable_sort (groups.begin(), groups.end(), [&] (const std::vector<PatchEntry>& ga, const std::vector<PatchEntry>& gb)
-    {
-        return less (ga.front(), gb.front());
-    });
-
-    voices.clear();
-    for (auto& g : groups)
-        voices.insert (voices.end(), std::make_move_iterator (g.begin()), std::make_move_iterator (g.end()));
+    applyOrder (order);
 }
 
 void PatchBrowser::sortOrderChanged (int newSortColumnId, bool isForwards)
@@ -844,13 +829,24 @@ void PatchBrowser::rebuildFiltered()
     const auto* store = favStore != nullptr ? favStore : &empty;
 
     auto q = LibraryFilter::parse (search.getText().toStdString(), favOnly.getToggleState());
+    if (bankFileView && q.hasSingles())
+    {
+        bankFileView = false;
+        groupToggle.setToggleState (false, juce::dontSendNotification);
+        updateListToggleUi();
+        applyDefaultSortForCurrentView();
+        updateBankChrome();
+        if (onBankFileViewChanged)
+            onBankFileViewChanged (false);
+    }
+
     const auto recentIds = recentStore != nullptr ? recentStore->contentIds() : std::unordered_set<uint64_t> {};
     const auto* recentPtr = (q.recentOnly && recentStore != nullptr) ? &recentIds : nullptr;
 
     auto filtered = BrowserList::filterForBrowser (all, currentScope(), q, *store, tagStore, recentPtr);
     auto voices = std::move (filtered.voices);
 
-    // Bank view always groups by file; All/Single stay flat.
+    // Bank view always groups by file; All stays flat.
     const bool grouping = bankFileView && q.orGroups.empty() && ! q.duplicatesOnly;
     applyColumnSort (voices, grouping);
     // Dedupe after sort so the kept copy matches the active column order.
@@ -885,7 +881,6 @@ void PatchBrowser::rebuildFiltered()
     suppressLoad = false;
     table.repaint();
     updateStickyHeader();
-    resized();
 }
 
 void PatchBrowser::updateStickyHeader()
@@ -1032,25 +1027,24 @@ void PatchBrowser::paintCell (juce::Graphics& g, int row, int columnId, int widt
         case 4: text = folderColumnText (e); break;
         case 5: text = e.bankSlot > 0 ? juce::String (e.bankSlot) : ""; break;
         case 6:
-            if (tagStore != nullptr)
+        {
+            const auto tags = tagsForDisplay (e);
+            juce::Font font (juce::FontOptions (13.0f));
+            g.setFont (font);
+            const auto chips = layoutTagChips (tags, font, (float) width, (float) height);
+            const auto textColour = findColour (juce::Label::textColourId);
+            const auto bg = findColour (juce::TextEditor::backgroundColourId);
+            for (const auto& chip : chips)
             {
-                const auto tags = tagStore->getTags (e.contentId);
-                juce::Font font (juce::FontOptions (13.0f));
-                g.setFont (font);
-                const auto chips = layoutTagChips (tags, font, (float) width, (float) height);
-                const auto textColour = findColour (juce::Label::textColourId);
-                const auto bg = findColour (juce::TextEditor::backgroundColourId);
-                for (const auto& chip : chips)
-                {
-                    g.setColour (textColour.interpolatedWith (bg, 0.72f));
-                    g.fillRoundedRectangle (chip.bounds, 3.0f);
-                    g.setColour (textColour);
-                    g.drawText (juce::String::fromUTF8 (chip.name.c_str()),
-                                chip.bounds.toNearestInt(),
-                                juce::Justification::centred, true);
-                }
+                g.setColour (textColour.interpolatedWith (bg, 0.72f));
+                g.fillRoundedRectangle (chip.bounds, 3.0f);
+                g.setColour (textColour);
+                g.drawText (juce::String::fromUTF8 (chip.name.c_str()),
+                            chip.bounds.toNearestInt(),
+                            juce::Justification::centred, true);
             }
             return;
+        }
         default: break;
     }
     g.drawText (text, 4, 0, width - 8, height, juce::Justification::centredLeft, true);
@@ -1141,11 +1135,11 @@ void PatchBrowser::clearSearch()
 
 std::string PatchBrowser::tagAtCellPoint (int row, int width, int height, juce::Point<float> local) const
 {
-    if (tagStore == nullptr || ! juce::isPositiveAndBelow (row, static_cast<int> (rows.size())))
+    if (! juce::isPositiveAndBelow (row, static_cast<int> (rows.size())))
         return {};
     if (rows[static_cast<size_t> (row)].kind != BrowserRowKind::voice)
         return {};
-    const auto tags = tagStore->getTags (rows[static_cast<size_t> (row)].entry.contentId);
+    const auto tags = tagsForDisplay (rows[static_cast<size_t> (row)].entry);
     juce::Font font (juce::FontOptions (13.0f));
     const auto chips = layoutTagChips (tags, font, (float) width, (float) height);
     for (const auto& chip : chips)
@@ -1247,6 +1241,7 @@ void PatchBrowser::showSearchFilterMenu()
         fav = 1,
         recent,
         dupe,
+        singles,
         tag,
         andOp,
         orOp,
@@ -1260,11 +1255,12 @@ void PatchBrowser::showSearchFilterMenu()
     menu.addItem (fav, "fav:  -  favorites only");
     menu.addItem (recent, "recent:  -  recently loaded voices");
     menu.addItem (dupe, "dupe:  -  voices that appear more than once");
+    menu.addItem (singles, ":singles  -  1-voice SysEx (not bank slots)");
     menu.addItem (tag, "tag:  -  filter by tag (type name after)");
 
     menu.addSeparator();
     menu.addSectionHeader ("Tag filters");
-    const auto catalog = tagStore != nullptr ? tagStore->allUniqueTags() : std::vector<std::string> {};
+    const auto catalog = tagFilterCatalog();
     {
         juce::PopupMenu tagMenu;
         if (catalog.empty())
@@ -1304,6 +1300,7 @@ void PatchBrowser::showSearchFilterMenu()
                                 case fav: safe->insertSearchFilterToken ("fav:"); break;
                                 case recent: safe->insertSearchFilterToken ("recent:"); break;
                                 case dupe: safe->insertSearchFilterToken ("dupe:"); break;
+                                case singles: safe->insertSearchFilterToken (":singles"); break;
                                 case tag: safe->insertSearchFilterToken ("tag:"); break;
                                 case andOp: safe->insertSearchFilterToken ("AND"); break;
                                 case orOp: safe->insertSearchFilterToken ("OR"); break;
@@ -1333,6 +1330,8 @@ void PatchBrowser::insertSearchFilterToken (const juce::String& token)
     else if (token == "recent:" && low.contains ("recent:"))
         return;
     else if (token == "dupe:" && (low.contains ("dupe:") || low.contains ("dup:")))
+        return;
+    else if (token == ":singles" && (low.contains (":singles") || low.contains ("singles:")))
         return;
 
     juce::String insert = token;
