@@ -98,7 +98,7 @@ SettingsPanel::SettingsPanel()
     hideDuplicates.setTooltip ("Hide voices with the same sound parameters (ignores the 10-character name and unused bits; keeps the first after the current column sort).");
     showTooltips.setTooltip ("Enable or disable tooltips across the UI.");
     showTooltips.setToggleState (true, juce::dontSendNotification);
-    midiControllerThru.setTooltip ("Forward note/CC MIDI from the controller input to MIDI out (default off). When Note morph is Random/Edges, the first key of a phrase morphs then plays after a short SysEx lead-in. SysEx stays on the device input.");
+    midiControllerThru.setTooltip ("Forward note/CC MIDI from the controller input to MIDI out (default off). (DAW) controller notes drive morph only until this is on. When Note morph is Random/Edges, the first key of a phrase morphs then plays after a short SysEx lead-in. SysEx stays on the device input.");
     channelLabel.setTooltip ("MIDI channel sent to the synth (1-16). Applies immediately.");
     pacingLabel.setTooltip ("Delay after each SysEx message for unreliable interfaces. Applies immediately.");
     morphEmitLabel.setTooltip ("Controls morph SysEx byte budget (lower = denser updates). Pad clicks / drag-end commit a full dump when idle.");
@@ -119,8 +119,9 @@ SettingsPanel::SettingsPanel()
     noteLabel.setTooltip ("MIDI note used by the Audition button.");
     velLabel.setTooltip ("Velocity of the Audition note.");
     durLabel.setTooltip ("Note length for context-menu Audition. The header Audition button is press-and-hold and ignores this.");
-    midiInLabel.setTooltip ("Device / SysEx input (TX7/DX7 dumps).");
-    midiControllerLabel.setTooltip ("Separate input for Note On morph performance. Leave (none) if unused.");
+    midiInLabel.setTooltip ("Device / SysEx input (TX7/DX7 dumps). Choose (DAW) to receive SysEx from the host MIDI bus (plugin formats only).");
+    midiControllerLabel.setTooltip ("Separate input for Note On morph performance. Choose (DAW) for host MIDI notes. Leave (none) if unused.");
+    midiOutLabel.setTooltip ("MIDI output for SysEx and notes. Choose (DAW) to send to the host MIDI bus (plugin formats only).");
     applyMidiPorts.setTooltip ("Apply the selected MIDI device in/out and controller input. Port changes are not used until you click this.");
     rescan.setTooltip ("Apply enabled library folders and rescan for .syx / .dx7 files.");
     autoTag.setTooltip ("Add name-based category/mood tags. Merges with existing tags; does not remove manual tags.");

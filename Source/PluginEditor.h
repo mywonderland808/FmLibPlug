@@ -7,7 +7,6 @@
 #include "ui/PatchBrowser.h"
 #include "ui/SettingsPanel.h"
 #include "util/AuditionHoldInputs.h"
-#include <set>
 
 class FmLibPlugAudioProcessorEditor : public juce::AudioProcessorEditor,
                                       public juce::DragAndDropContainer,
@@ -37,6 +36,7 @@ private:
     void showSettingsMode();
     void showMorphMode();
     void restoreListFocus();
+    void syncMorphPanelFromProcessor();
     void syncAuditionPrefsFromSettings();
     void syncMorphPrefsFromSettings (bool persist);
     int morphNoteLeadMs() const;
@@ -81,10 +81,12 @@ private:
     int lastDeviceVoiceCount = -1;
     juce::String lastMidiStatus;
     fmlib::BrowserStats browserStats;
-    std::set<int> controllerHeldNotes;
     fmlib::AuditionHoldInputs auditionHoldInputs;
     bool ignoreAuditionButtonState = false;
     bool morphPaused = false;
+    int lastSyncedMotion = -1;
+    uint32_t lastSyncedLockGroups = 0xffffffffu;
+    bool lastSyncedCornersReady = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (FmLibPlugAudioProcessorEditor)
 };

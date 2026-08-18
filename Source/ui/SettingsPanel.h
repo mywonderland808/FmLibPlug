@@ -136,7 +136,7 @@ private:
         "Hardware checklist: Memory Protect OFF; MIDI channel match; "
         "Computer OUT -> synth IN; synth OUT -> Computer IN (device input); "
         "optional controller keyboard -> MIDI controller in (TX7 local keys do not reach the plugin). "
-        "Enable Forward controller MIDI to hear notes on the synth. "
+        "Enable Forward controller MIDI to send controller/DAW notes to the synth. "
         "Morph while playing: Frequency only glides pitch and saves the rest for the next silence; "
         "All parameters sweeps everything live, which clicks on a DX7 mkI / TX7 (often musically). "
         "Morph release hold keeps that saved-up dump out of the release tail of the last note; "

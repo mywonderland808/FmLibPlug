@@ -71,6 +71,8 @@ void AppPreferences::loadFromFile (const juce::File& f)
         if (! xml->getBoolAttribute ("morphLfoClockwise", true) && morphLfoRateHz > 0.0f)
             morphLfoRateHz = -morphLfoRateHz;
         morphLfoRateHz = juce::jlimit (-1.5f, 1.5f, morphLfoRateHz);
+        morphLfoTempoSync = xml->getBoolAttribute ("morphLfoTempoSync", false);
+        morphLfoDivision = juce::jlimit (0, 13, xml->getIntAttribute ("morphLfoDivision", 2));
         if (xml->hasAttribute ("morphNoteJumpMode"))
             morphNoteJumpMode = juce::jlimit (0, 2, xml->getIntAttribute ("morphNoteJumpMode", 0));
         else if (xml->getBoolAttribute ("morphRandomOnNote", false))
@@ -145,6 +147,8 @@ void AppPreferences::saveToFile (const juce::File& f) const
     xml->setAttribute ("tagFilterExpanded", tagFilterExpanded);
     xml->setAttribute ("morphLfoEnabled", morphLfoEnabled);
     xml->setAttribute ("morphLfoRateHz", (double) morphLfoRateHz);
+    xml->setAttribute ("morphLfoTempoSync", morphLfoTempoSync);
+    xml->setAttribute ("morphLfoDivision", morphLfoDivision);
     xml->setAttribute ("morphNoteJumpMode", morphNoteJumpMode);
     xml->setAttribute ("morphStreamMode", morphStreamMode);
     xml->setAttribute ("midiControllerThru", midiControllerThru);

@@ -1,4 +1,5 @@
 #include "midi/MidiDeviceManager.h"
+#include "midi/MidiPortNames.h"
 #include "sysex/SysexMessages.h"
 #include <cmath>
 
@@ -36,17 +37,21 @@ void MidiDeviceManager::refreshDevices()
     setStatus ("MIDI device lists refreshed");
 }
 
-juce::StringArray MidiDeviceManager::getInputNames() const
+juce::StringArray MidiDeviceManager::getInputNames (bool includeDaw) const
 {
     juce::StringArray names;
+    if (includeDaw)
+        names.add (kDawMidiPortName);
     for (auto& d : juce::MidiInput::getAvailableDevices())
         names.add (d.name);
     return names;
 }
 
-juce::StringArray MidiDeviceManager::getOutputNames() const
+juce::StringArray MidiDeviceManager::getOutputNames (bool includeDaw) const
 {
     juce::StringArray names;
+    if (includeDaw)
+        names.add (kDawMidiPortName);
     for (auto& d : juce::MidiOutput::getAvailableDevices())
         names.add (d.name);
     return names;
@@ -56,9 +61,17 @@ bool MidiDeviceManager::openInputByName (const juce::String& name)
 {
     input.reset();
     inputName.clear();
+    hostDeviceInput = false;
     if (name.isEmpty())
     {
         setStatus ("MIDI device input closed");
+        return true;
+    }
+    if (isDawMidiPortName (name))
+    {
+        hostDeviceInput = true;
+        inputName = name;
+        setStatus ("MIDI in: " + name);
         return true;
     }
     for (auto& d : juce::MidiInput::getAvailableDevices())
@@ -83,11 +96,19 @@ bool MidiDeviceManager::openControllerInputByName (const juce::String& name)
 {
     controllerInput.reset();
     controllerInputName.clear();
+    hostControllerInput = false;
     clearThruHeldNotes();
     if (name.isEmpty())
     {
         setStatus ("MIDI controller input closed");
         syncNotesSounding (notesSoundingFn ? notesSoundingFn() : false);
+        return true;
+    }
+    if (isDawMidiPortName (name))
+    {
+        hostControllerInput = true;
+        controllerInputName = name;
+        setStatus ("MIDI controller in: " + name);
         return true;
     }
     for (auto& d : juce::MidiInput::getAvailableDevices())
@@ -117,6 +138,24 @@ bool MidiDeviceManager::openOutputByName (const juce::String& name)
         output.reset();
         bgThreadStarted = false;
         outputName.clear();
+        hostOutput = false;
+    }
+    {
+        const juce::ScopedLock sl (hostOutLock);
+        hostOutQueue.clear();
+    }
+
+    if (name.isEmpty())
+    {
+        setStatus ("MIDI output closed");
+        return true;
+    }
+    if (isDawMidiPortName (name))
+    {
+        hostOutput = true;
+        outputName = name;
+        setStatus ("MIDI out: " + name);
+        return true;
     }
 
     for (auto& d : juce::MidiOutput::getAvailableDevices())
@@ -163,6 +202,13 @@ void MidiDeviceManager::close()
     inputName.clear();
     controllerInputName.clear();
     outputName.clear();
+    hostDeviceInput = false;
+    hostControllerInput = false;
+    hostOutput = false;
+    {
+        const juce::ScopedLock sl (hostOutLock);
+        hostOutQueue.clear();
+    }
     clearThruHeldNotes();
     morphBusyUntilMs = 0.0;
     notesQuietAtMs = 0.0;
@@ -262,13 +308,156 @@ void MidiDeviceManager::ensureMorphTimer()
         startTimer (kMorphTickMs);
 }
 
+bool MidiDeviceManager::hasOutput() const
+{
+    return output != nullptr || hostOutput;
+}
+
+void MidiDeviceManager::enqueueHostOutput (const juce::MidiMessage& message, double dueMs)
+{
+    const juce::ScopedLock sl (hostOutLock);
+    hostOutQueue.push_back ({ message, dueMs });
+}
+
+void MidiDeviceManager::exchangeHostMidi (juce::MidiBuffer& midiMessages)
+{
+    processHostMidiInput (midiMessages);
+    midiMessages.clear();
+    collectHostMidiOutput (midiMessages);
+}
+
+void MidiDeviceManager::collectHostMidiOutput (juce::MidiBuffer& midiMessages)
+{
+    if (! hostOutput)
+        return;
+
+    const juce::ScopedLock sl (hostOutLock);
+    if (hostOutQueue.empty())
+        return;
+
+    const double now = juce::Time::getMillisecondCounterHiRes();
+    size_t keep = 0;
+    for (size_t i = 0; i < hostOutQueue.size(); ++i)
+    {
+        if (hostOutQueue[i].dueMs <= now)
+        {
+            midiMessages.addEvent (hostOutQueue[i].message, 0);
+            continue;
+        }
+        if (keep != i)
+            hostOutQueue[keep] = std::move (hostOutQueue[i]);
+        ++keep;
+    }
+    hostOutQueue.resize (keep);
+}
+
+void MidiDeviceManager::handleDeviceSysex (const juce::MidiMessage& message)
+{
+    if (! message.isSysEx())
+        return;
+
+    const auto* d = message.getSysExData();
+    const int n = message.getSysExDataSize();
+    std::vector<uint8_t> full;
+    full.reserve (static_cast<size_t> (n) + 2);
+    full.push_back (0xf0);
+    full.insert (full.end(), d, d + n);
+    full.push_back (0xf7);
+
+    if (sysexFn)
+        sysexFn (full);
+}
+
+void MidiDeviceManager::thruControllerMessageIfEnabled (const juce::MidiMessage& message)
+{
+    const bool isNoteOn = message.isNoteOn() && message.getVelocity() > 0;
+    const bool isNoteOff = message.isNoteOff()
+                        || (message.isNoteOn() && message.getVelocity() == 0);
+    const int note = message.getNoteNumber();
+    const bool skipNoteThru = controllerNotesToCallbacksOnly.load (std::memory_order_relaxed)
+                           && (isNoteOn || isNoteOff);
+    if (! controllerThru.load (std::memory_order_relaxed) || ! hasOutput()
+        || message.isSysEx() || skipNoteThru)
+        return;
+
+    sendMessageNowLocked (message);
+    {
+        const juce::ScopedLock sl (thruLock);
+        if (isNoteOn)
+            thruHeldNotes.insert (note);
+        else if (isNoteOff)
+            thruHeldNotes.erase (note);
+    }
+}
+
+void MidiDeviceManager::handleControllerMessage (const juce::MidiMessage& message, bool thruAlreadyHandled)
+{
+    const bool isNoteOn = message.isNoteOn() && message.getVelocity() > 0;
+    const bool isNoteOff = message.isNoteOff()
+                        || (message.isNoteOn() && message.getVelocity() == 0);
+    const int note = message.getNoteNumber();
+
+    if (isNoteOn && noteOnFn)
+        noteOnFn (note, (int) message.getVelocity());
+    if (isNoteOff && noteOffFn)
+        noteOffFn (note, 0);
+
+    if (! thruAlreadyHandled)
+        thruControllerMessageIfEnabled (message);
+
+    if (isNoteOn || isNoteOff)
+    {
+        const auto epoch = ++thruSyncEpoch;
+        juce::MessageManager::callAsync ([this, epoch, alive = alive]
+        {
+            if (! alive->load() || epoch != thruSyncEpoch.load())
+                return;
+            syncNotesSounding (notesSoundingFn ? notesSoundingFn() : false);
+        });
+    }
+}
+
+void MidiDeviceManager::processHostMidiInput (const juce::MidiBuffer& midiMessages)
+{
+    if (! hostDeviceInput && ! hostControllerInput)
+        return;
+
+    for (const auto metadata : midiMessages)
+    {
+        const auto message = metadata.getMessage();
+        if (hostControllerInput && ! message.isSysEx())
+        {
+            thruControllerMessageIfEnabled (message);
+            juce::MessageManager::callAsync ([this, message, alive = alive]
+            {
+                if (! alive->load())
+                    return;
+                handleControllerMessage (message, true);
+            });
+        }
+        if (hostDeviceInput && message.isSysEx())
+        {
+            juce::MessageManager::callAsync ([this, message, alive = alive]
+            {
+                if (! alive->load())
+                    return;
+                handleDeviceSysex (message);
+            });
+        }
+    }
+}
+
 bool MidiDeviceManager::sendMessageNowLocked (const juce::MidiMessage& message)
 {
+    if (hostOutput)
+    {
+        enqueueHostOutput (message);
+        return true;
+    }
     const juce::ScopedLock sl (outputLock);
     if (output == nullptr)
         return false;
     ensureBackgroundThread();
-    // Immediate path for single note events - still serialized with morph egress.
     output->sendMessageNow (message);
     return true;
 }
@@ -277,6 +466,27 @@ bool MidiDeviceManager::sendMessagesScheduled (const std::vector<std::vector<uin
 {
     if (messages.empty())
         return true;
+
+    if (hostOutput)
+    {
+        const double now = juce::Time::getMillisecondCounterHiRes();
+        double t = juce::jmax (now, morphBusyUntilMs);
+        auto wireMs = [] (const std::vector<uint8_t>& bytes)
+        {
+            return estimateSysexWireMs (static_cast<int> (bytes.size()));
+        };
+        const int gap = juce::jmax (1, spacingMs);
+        for (size_t i = 0; i < messages.size(); ++i)
+        {
+            const auto& bytes = messages[i];
+            enqueueHostOutput (juce::MidiMessage (bytes.data(), static_cast<int> (bytes.size())), t);
+            t += static_cast<double> (wireMs (bytes));
+            if (i + 1 < messages.size())
+                t += static_cast<double> (gap);
+        }
+        morphBusyUntilMs = t;
+        return true;
+    }
 
     const juce::ScopedLock sl (outputLock);
     if (output == nullptr)
@@ -323,7 +533,7 @@ bool MidiDeviceManager::sendMessagesScheduled (const std::vector<std::vector<uin
 
 bool MidiDeviceManager::sendRaw (const std::vector<uint8_t>& bytes, bool pace)
 {
-    if (output == nullptr)
+    if (! hasOutput())
     {
         setStatus ("No MIDI output");
         return false;
@@ -355,7 +565,7 @@ void MidiDeviceManager::invalidateMorphBaseline()
 
 bool MidiDeviceManager::sendMorphVoice (const VoiceData& voice, bool forceCommit, bool liveAllParams)
 {
-    if (output == nullptr)
+    if (! hasOutput())
     {
         setStatus ("No MIDI output");
         return false;
@@ -432,7 +642,7 @@ bool MidiDeviceManager::requestDump (bool bank32)
 
 bool MidiDeviceManager::sendNoteOn (int note, int velocity)
 {
-    if (output == nullptr)
+    if (! hasOutput())
     {
         setStatus ("No MIDI output");
         return false;
@@ -444,7 +654,7 @@ bool MidiDeviceManager::sendNoteOn (int note, int velocity)
 
 bool MidiDeviceManager::sendNoteOff (int note)
 {
-    if (output == nullptr)
+    if (! hasOutput())
         return false;
     return sendMessageNowLocked (juce::MidiMessage::noteOff (channel, juce::jlimit (0, 127, note)));
 }
@@ -453,55 +663,14 @@ void MidiDeviceManager::handleIncomingMidiMessage (juce::MidiInput* source, cons
 {
     if (source == controllerInput.get())
     {
-        const bool isNoteOn = message.isNoteOn() && message.getVelocity() > 0;
-        const bool isNoteOff = message.isNoteOff()
-                            || (message.isNoteOn() && message.getVelocity() == 0);
-        const int note = message.getNoteNumber();
-
-        if (isNoteOn && noteOnFn)
-            noteOnFn (note, (int) message.getVelocity());
-        if (isNoteOff && noteOffFn)
-            noteOffFn (note, 0);
-
-        const bool skipNoteThru = controllerNotesToCallbacksOnly && (isNoteOn || isNoteOff);
-        if (controllerThru && output != nullptr && ! message.isSysEx() && ! skipNoteThru)
-        {
-            sendMessageNowLocked (message);
-            // Track thru notes under lock; morph sounding is updated on the message thread.
-            {
-                const juce::ScopedLock sl (thruLock);
-                if (isNoteOn)
-                    thruHeldNotes.insert (note);
-                else if (isNoteOff)
-                    thruHeldNotes.erase (note);
-            }
-            const auto epoch = ++thruSyncEpoch;
-            juce::MessageManager::callAsync ([this, epoch, alive = alive]
-            {
-                if (! alive->load() || epoch != thruSyncEpoch.load())
-                    return; // destroyed, superseded or closed
-                syncNotesSounding (notesSoundingFn ? notesSoundingFn() : false);
-            });
-        }
+        handleControllerMessage (message);
         return;
     }
 
     if (source != input.get())
         return;
 
-    if (! message.isSysEx())
-        return;
-
-    const auto* d = message.getSysExData();
-    const int n = message.getSysExDataSize();
-    std::vector<uint8_t> full;
-    full.reserve (static_cast<size_t> (n) + 2);
-    full.push_back (0xf0);
-    full.insert (full.end(), d, d + n);
-    full.push_back (0xf7);
-
-    if (sysexFn)
-        sysexFn (full);
+    handleDeviceSysex (message);
 }
 
 } // namespace fmlib

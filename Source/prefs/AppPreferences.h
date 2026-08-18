@@ -65,6 +65,8 @@ public:
     bool morphLfoEnabled = false;
     /** Signed edge-LFO rate in Hz; negative = CCW, positive = CW. */
     float morphLfoRateHz = 0.25f;
+    bool morphLfoTempoSync = false;
+    int morphLfoDivision = 2;
     /**
      * On controller Note-On / Audition with morph jump:
      * 0 = off, 1 = random pad, 2 = cycle corners A-B-D-C.

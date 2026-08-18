@@ -35,6 +35,8 @@ TEST_CASE ("AppPreferences saveToFile loadFromFile round-trip", "[prefs]")
         prefs.morphLockRefY = 0.7f;
         prefs.morphLfoEnabled = true;
         prefs.morphLfoRateHz = -0.5f;
+        prefs.morphLfoTempoSync = true;
+        prefs.morphLfoDivision = 8;
         prefs.morphNoteJumpMode = 2;
         prefs.morphStreamMode = 0;
         prefs.midiControllerThru = true;
@@ -70,6 +72,8 @@ TEST_CASE ("AppPreferences saveToFile loadFromFile round-trip", "[prefs]")
     REQUIRE (loaded.morphLockRefY == Catch::Approx (0.7f));
     REQUIRE (loaded.morphLfoEnabled);
     REQUIRE (loaded.morphLfoRateHz == Catch::Approx (-0.5f));
+    REQUIRE (loaded.morphLfoTempoSync);
+    REQUIRE (loaded.morphLfoDivision == 8);
     REQUIRE (loaded.morphNoteJumpMode == 2);
     REQUIRE (loaded.morphStreamMode == 0);
     REQUIRE (loaded.midiControllerThru);

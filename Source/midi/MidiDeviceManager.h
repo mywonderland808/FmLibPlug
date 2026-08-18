@@ -25,13 +25,28 @@ public:
     ~MidiDeviceManager() override;
 
     void refreshDevices();
-    juce::StringArray getInputNames() const;
-    juce::StringArray getOutputNames() const;
+    juce::StringArray getInputNames (bool includeDaw = false) const;
+    juce::StringArray getOutputNames (bool includeDaw = false) const;
 
     bool openInputByName (const juce::String& name);
     bool openControllerInputByName (const juce::String& name);
     bool openOutputByName (const juce::String& name);
     void close();
+
+    bool usesHostDeviceInput() const { return hostDeviceInput; }
+    bool usesHostControllerInput() const { return hostControllerInput; }
+    bool usesHostOutput() const { return hostOutput; }
+
+    /**
+     * Audio thread: consume host MIDI for the (DAW) ports, then replace the buffer
+     * with plugin-originated output only. Incoming notes/CC never pass through;
+     * they reach MIDI out only via controller thru or sendNoteOn / SysEx.
+     */
+    void exchangeHostMidi (juce::MidiBuffer& midiMessages);
+    /** Audio thread: consume host MIDI in; posts callbacks on the message thread. */
+    void processHostMidiInput (const juce::MidiBuffer& midiMessages);
+    /** Audio thread: append queued host MIDI out events. */
+    void collectHostMidiOutput (juce::MidiBuffer& midiMessages);
 
     void setChannel (int channel1to16);
     int getChannel() const { return channel; }
@@ -46,9 +61,12 @@ public:
      */
     void setMorphReleaseGuardMs (int ms) { morphReleaseGuardMs = juce::jlimit (0, 2000, ms); }
 
-    void setControllerThru (bool enabled) { controllerThru = enabled; }
+    void setControllerThru (bool enabled) { controllerThru.store (enabled, std::memory_order_relaxed); }
     /** When true, note on/off go to callbacks only (not thru); CC/other still thru if enabled. */
-    void setControllerNotesToCallbacksOnly (bool enabled) { controllerNotesToCallbacksOnly = enabled; }
+    void setControllerNotesToCallbacksOnly (bool enabled)
+    {
+        controllerNotesToCallbacksOnly.store (enabled, std::memory_order_relaxed);
+    }
 
     void setMorphStreamMode (MorphStreamMode m);
     void setMorphByteBudget (int bytes);
@@ -97,8 +115,13 @@ private:
     void timerCallback() override;
     void setStatus (const juce::String& s);
     void ensureBackgroundThread();
+    bool hasOutput() const;
     bool sendMessagesScheduled (const std::vector<std::vector<uint8_t>>& messages, int spacingMs);
     bool sendMessageNowLocked (const juce::MidiMessage& message);
+    void enqueueHostOutput (const juce::MidiMessage& message, double dueMs = 0.0);
+    void handleControllerMessage (const juce::MidiMessage& message, bool thruAlreadyHandled = false);
+    void thruControllerMessageIfEnabled (const juce::MidiMessage& message);
+    void handleDeviceSysex (const juce::MidiMessage& message);
     void ensureMorphTimer();
     void clearThruHeldNotes();
     void updateNotesSounding (bool sounding);
@@ -109,11 +132,21 @@ private:
     std::unique_ptr<juce::MidiInput> controllerInput;
     std::unique_ptr<juce::MidiOutput> output;
     juce::String inputName, controllerInputName, outputName;
+    bool hostDeviceInput = false;
+    bool hostControllerInput = false;
+    bool hostOutput = false;
+    juce::CriticalSection hostOutLock;
+    struct HostOutEvent
+    {
+        juce::MidiMessage message;
+        double dueMs = 0.0;
+    };
+    std::vector<HostOutEvent> hostOutQueue;
     int channel = 1;
     int pacingMs = 20;
     int morphReleaseGuardMs = 250;
-    bool controllerThru = false;
-    bool controllerNotesToCallbacksOnly = false;
+    std::atomic<bool> controllerThru { false };
+    std::atomic<bool> controllerNotesToCallbacksOnly { false };
     bool bgThreadStarted = false;
     juce::CriticalSection outputLock;
     mutable juce::CriticalSection thruLock;

@@ -1,6 +1,6 @@
 # FmLibPlug
 
-**Version 1.2.1** — AGPL-3.0 JUCE 8 MIDI librarian for **Yamaha DX7 mkI / TX7** voice SysEx.
+**Version 1.3.0** — AGPL-3.0 JUCE 8 MIDI librarian for **Yamaha DX7 mkI / TX7** voice SysEx.
 
 Product name: **FmLibPlug**. Release notes: [CHANGELOG.md](CHANGELOG.md). Version source: `project(FmLibPlug VERSION ...)` in `CMakeLists.txt`. Cross-platform notes: [docs/PLATFORM.md](docs/PLATFORM.md).
 
@@ -18,7 +18,11 @@ Product name: **FmLibPlug**. Release notes: [CHANGELOG.md](CHANGELOG.md). Versio
 - XY morpher (4 corners + morph presets; parameter locks; edge LFO; Note morph via controller MIDI in)
 - Morph while playing: frequency-only (default) or all-parameter streaming (see below)
 - Dark / light theme, hardware checklist in Settings; resizable editor
-- SysEx pacing; separate MIDI device vs controller inputs; audio **passthrough** insert
+- SysEx pacing; separate MIDI device vs controller inputs; **`(DAW)`** host MIDI bus option in Settings (plugin formats); audio **passthrough** insert
+
+### Host integration (DAW)
+
+Automatable parameters: **Morph X**, **Morph Y**, **Lock Ref X/Y**, **Edge LFO Rate**, **Edge LFO Sync**, **Edge LFO Div**, **Morph Motion** (Off / Random / Edges / Edge LFO). Saving the project recalls the last live morph set (corners, locks, pad). On the morph page, **Sync** locks Edge LFO to host tempo; **CCW** reverses the orbit. The selected division is one pad edge, so **1/4** is one full A-B-D-C orbit per bar of 4/4. Edge LFO keeps running while the transport is playing; Morph X/Y automation drives the pad when Edge LFO is off. In Settings, choose **`(DAW)`** on MIDI in/out/controller to route through the host instead of hardware ports (hidden in Standalone). Host MIDI into the **controller** port drives Note morph only; it is not sent to the synth unless **Forward controller MIDI to output** is on. Prefer hardware or Standalone for bulk SysEx if your DAW strips large messages on the plugin MIDI bus; avoid routing plugin MIDI out directly back into plugin MIDI in.
 
 ### Morph on DX7 mkI / TX7
 

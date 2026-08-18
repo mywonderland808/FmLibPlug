@@ -1,7 +1,7 @@
 # FmLibPlug
 cmake_minimum_required(VERSION 3.22)
 
-project(FmLibPlug VERSION 1.2.1)
+project(FmLibPlug VERSION 1.3.0)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -71,8 +71,11 @@ target_sources(FmLibPlug
     Source/library/AutoTagger.cpp
     Source/library/RecentStore.cpp
     Source/library/MorphPresetStore.cpp
+    Source/library/MorphPresetXml.cpp
     Source/library/PatchEntry.cpp
     Source/library/DeviceBuffer.cpp
+    Source/host/MorphHostState.cpp
+    Source/host/PluginSessionState.cpp
     Source/sysex/Dx7Formats.cpp
     Source/sysex/SysexParser.cpp
     Source/sysex/SysexMessages.cpp
@@ -213,6 +216,8 @@ if(FMLIBPLUG_BUILD_TESTS)
     Tests/unit/VoiceMorpherTests.cpp
     Tests/unit/MorphTransportTests.cpp
     Tests/unit/MorphPresetStoreTests.cpp
+    Tests/unit/HostIntegrationTests.cpp
+    Tests/unit/MidiHostRoutingTests.cpp
     Tests/unit/AuditionHoldInputsTests.cpp
     Source/sysex/Dx7Formats.cpp
     Source/sysex/SysexParser.cpp
@@ -231,7 +236,13 @@ if(FMLIBPLUG_BUILD_TESTS)
     Source/library/RecentStore.cpp
     Source/library/PatchEntry.cpp
     Source/library/MorphPresetStore.cpp
+    Source/library/MorphPresetXml.cpp
     Source/library/DeviceBuffer.cpp
+    Source/host/MorphHostState.cpp
+    Source/host/PluginSessionState.cpp
+    Source/midi/MidiDeviceManager.cpp
+    Source/midi/MorphTransport.cpp
+    Source/sysex/SysexMessages.cpp
     Source/prefs/AppPreferences.cpp
   )
   add_dependencies(FmLibPlugUnitTests FmLibPlugFixtures)
@@ -247,6 +258,9 @@ if(FMLIBPLUG_BUILD_TESTS)
     PRIVATE
       Catch2::Catch2WithMain
       juce::juce_core
+      juce::juce_events
+      juce::juce_audio_devices
+      juce::juce_audio_processors
   )
 
   add_test(NAME FmLibPlugUnit COMMAND FmLibPlugUnitTests)

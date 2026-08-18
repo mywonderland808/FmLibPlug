@@ -26,11 +26,22 @@ public:
     enum class Mode { morph, presets };
 
     void setMode (Mode m);
+    Mode getMode() const { return mode; }
 
     void setCorner (int corner0to3, const VoiceData& v, const juce::String& name);
     /** Corner voices only; locks and lock reference are untouched (see resetLocksToDefaults). */
     void clearCorners();
+    /** Fired after corners are cleared (processor should reset its live snapshot). */
+    std::function<void()> onCornersCleared;
     void setMarkerPosition (float x, float y);
+    void setMarkerFromHost (float x, float y);
+    void setLockRefFromHost (float x, float y);
+    /** Restore corners, locks, and pad from the processor live snapshot. */
+    void applyPresetSnapshot (const MorphPreset& p);
+    void syncMotionFromHost (int motionChoice, float lfoRateHz,
+                             bool tempoSync = false, int division = 2);
+    void setProcessorOwnsMotion (bool on) { processorOwnsMotion = on; }
+
     void jumpToRandomPosition();
     void jumpToNextEdge();
     void setPresetStore (MorphPresetStore* store);
@@ -40,6 +51,7 @@ public:
     void setEmitIntervalMs (int ms);
 
     void setLockGroups (uint32_t groups);
+    uint32_t getLockGroups() const { return lockGroups; }
     /** Session defaults snapshotted at editor open (Reset restores these). */
     void setDefaultLockGroups (uint32_t groups);
     uint32_t getDefaultLockGroups() const { return defaultLockGroups; }
@@ -56,17 +68,14 @@ public:
     /** When true, LFO/pad morph emits are suppressed (paused after library click on Morph page). */
     void setEgressPaused (bool paused);
     bool isEgressPaused() const { return egressPaused; }
-    /** Clear pause and send the morph at the current pad position. */
-    void reemitCurrent();
-
-    /** Turn off Edge LFO and Note morph (mutually exclusive drivers stay off). */
-    void stopMotionDrivers();
 
     void setLfoEnabled (bool on);
     bool getLfoEnabled() const { return lfoEnabled; }
     /** Signed Hz; negative = CCW, positive = CW. Near-zero disables motion while toggle stays on. */
     void setLfoRateHz (float hz);
     float getLfoRateHz() const { return lfoRateHz; }
+    bool getLfoTempoSync() const { return lfoTempoSync; }
+    int getLfoDivision() const { return lfoDivisionChoice; }
 
     enum class NoteJumpMode { off = 0, random = 1, edges = 2 };
     void setNoteJumpMode (NoteJumpMode m);
@@ -96,6 +105,12 @@ public:
      * or turning Edge LFO / Note morph back on. Not fired on ordinary LFO ticks.
      */
     std::function<void()> onPadGestureStarted;
+    std::function<void(float x, float y, bool beginGesture, bool endGesture)> onMorphPositionHostWrite;
+    std::function<void(float x, float y, bool beginGesture, bool endGesture)> onLockRefHostWrite;
+    std::function<void(int motionChoice)> onMorphMotionHostWrite;
+    std::function<void(float hz)> onMorphLfoRateHostWrite;
+    std::function<void(bool sync)> onMorphLfoSyncHostWrite;
+    std::function<void(int division)> onMorphLfoDivisionHostWrite;
     std::function<void(int)> onRequestAssignCorner;
     std::function<void(const juce::String&)> onStatus;
 
@@ -135,13 +150,12 @@ private:
     /** Flow-lays the lock chips over as many rows as the width needs (no clipped names).
      *  Stops placing chips once fewer than minLeaveBelow pixels remain for chrome below. */
     void layoutLockChips (juce::Rectangle<int>& area, int minLeaveBelow);
-    void syncLfoUi();
+    void syncLfoUi (bool relayout = true);
     void syncNoteJumpUi();
     void ensureTimerRunning();
     void advanceLfo (double deltaSeconds);
     void updateMorphControlsEnabled();
     int effectiveEmitIntervalMs() const;
-    static void edgePosition (float phase01, bool clockwise, float& x, float& y);
 
     Mode mode = Mode::morph;
     VoiceData corners[4] {};
@@ -165,11 +179,15 @@ private:
     bool lfoEnabled = false;
     bool egressPaused = false;
     float lfoRateHz = 0.25f;
+    bool lfoTempoSync = false;
+    int lfoDivisionChoice = 2;
     float lfoPhase = 0.0f;
     int lastLfoStep = -1;
     uint32_t lastTimerMs = 0;
     NoteJumpMode noteJumpMode = NoteJumpMode::off;
     int edgeJumpIndex = 0;
+    bool hostParamSync = false;
+    bool processorOwnsMotion = false;
 
     juce::TextButton modeMorph { "Morph" }, modePresets { "Presets" };
     juce::TextButton assignA { "Set A" }, assignB { "Set B" }, assignC { "Set C" }, assignD { "Set D" };
@@ -183,7 +201,10 @@ private:
     juce::ToggleButton lockFreqFine { "Fine" };
     juce::TextButton resetLocksBtn { "Reset" }, setDefaultLocksBtn { "Set default" };
     juce::ToggleButton lfoToggle { "Edge LFO" };
+    juce::ToggleButton lfoSync { "Sync" };
+    juce::ToggleButton lfoCcw { "CCW" };
     juce::Slider lfoRate;
+    juce::ComboBox lfoDivision;
     juce::Label lfoRateLabel { {}, "Rate" };
     juce::Label noteJumpLabel { {}, "Note morph" };
     juce::ToggleButton noteJumpOff { "Off" }, noteJumpRandom { "Random" }, noteJumpEdges { "Edges" };

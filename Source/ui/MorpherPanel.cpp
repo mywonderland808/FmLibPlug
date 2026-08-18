@@ -1,4 +1,5 @@
 #include "ui/MorpherPanel.h"
+#include "host/MorphHostState.h"
 #include "sysex/VoiceMorpher.h"
 #include "ui/ThemePalette.h"
 #include <cmath>
@@ -10,8 +11,6 @@ namespace
 {
 constexpr float kPadDragThresholdPx = 4.0f;
 constexpr int kLfoTimerMs = 16;
-/** Fine perimeter steps — traffic limited by MorphTransport byte budget, not step count. */
-constexpr int kLfoStepsPerLoop = 96;
 
 /** Width a toggle needs for its full label, using the tick-box metrics of LookAndFeel_V4. */
 int toggleWidthFor (const juce::ToggleButton& b, int height)
@@ -20,6 +19,14 @@ int toggleWidthFor (const juce::ToggleButton& b, int height)
     const juce::Font font { juce::FontOptions (fontSize) };
     return juce::GlyphArrangement::getStringWidthInt (font, b.getButtonText())
          + juce::roundToInt (fontSize * 1.1f) + 16;
+}
+
+float rateWithClockwise (float hz, bool clockwise)
+{
+    float mag = std::abs (hz);
+    if (mag < kMorphLfoPauseHz)
+        mag = 0.25f;
+    return clockwise ? mag : -mag;
 }
 } // namespace
 
@@ -93,7 +100,24 @@ MorpherPanel::MorpherPanel()
     lfoToggle.setTooltip ("Walk the pad edges (A-B-D-C) continuously. Turns off Note morph when enabled. While on, left-click does not move the marker; right-drag still sets lock ref.");
     lfoToggle.onClick = [this]
     {
-        setLfoEnabled (lfoToggle.getToggleState());
+        if (hostParamSync)
+            return;
+        const bool on = lfoToggle.getToggleState();
+        const int choice = on
+                               ? static_cast<int> (fmlib::MorphMotionMode::edgeLfo)
+                               : static_cast<int> (fmlib::MorphMotionMode::off);
+        lfoEnabled = on;
+        if (on && noteJumpMode != NoteJumpMode::off)
+        {
+            noteJumpMode = NoteJumpMode::off;
+            syncNoteJumpUi();
+        }
+        if (onMorphMotionHostWrite)
+            onMorphMotionHostWrite (choice);
+        else
+            setLfoEnabled (on);
+        if (on)
+            resumeEgressIfPaused();
         if (onMorphUiPrefsChanged)
             onMorphUiPrefsChanged();
     };
@@ -107,12 +131,61 @@ MorpherPanel::MorpherPanel()
     lfoRate.setTooltip ("Edge LFO rate in Hz: positive = clockwise, negative = counter-clockwise. Near 0 = paused.");
     lfoRate.onValueChange = [this]
     {
+        if (hostParamSync)
+            return;
         lfoRateHz = (float) lfoRate.getValue();
+        if (onMorphLfoRateHostWrite)
+            onMorphLfoRateHostWrite (lfoRateHz);
         if (onMorphUiPrefsChanged)
             onMorphUiPrefsChanged();
     };
     addAndMakeVisible (lfoRate);
     addAndMakeVisible (lfoRateLabel);
+
+    lfoSync.setClickingTogglesState (true);
+    lfoSync.setTooltip ("Lock Edge LFO speed to the DAW tempo. Use CCW for counter-clockwise orbits.");
+    lfoSync.onClick = [this]
+    {
+        if (hostParamSync)
+            return;
+        lfoTempoSync = lfoSync.getToggleState();
+        if (onMorphLfoSyncHostWrite)
+            onMorphLfoSyncHostWrite (lfoTempoSync);
+        syncLfoUi();
+        if (onMorphUiPrefsChanged)
+            onMorphUiPrefsChanged();
+    };
+    addAndMakeVisible (lfoSync);
+
+    lfoCcw.setClickingTogglesState (true);
+    lfoCcw.setTooltip ("Counter-clockwise pad orbit while Sync is on. Off = clockwise (A-B-D-C). Stored as the sign of Edge LFO Rate.");
+    lfoCcw.onClick = [this]
+    {
+        if (hostParamSync)
+            return;
+        lfoRateHz = rateWithClockwise (lfoRateHz, ! lfoCcw.getToggleState());
+        lfoRate.setValue (lfoRateHz, juce::dontSendNotification);
+        if (onMorphLfoRateHostWrite)
+            onMorphLfoRateHostWrite (lfoRateHz);
+        if (onMorphUiPrefsChanged)
+            onMorphUiPrefsChanged();
+    };
+    addChildComponent (lfoCcw);
+
+    lfoDivision.addItemList (morphLfoDivisionLabels(), 1);
+    lfoDivision.setSelectedItemIndex (kMorphLfoDivisionDefault, juce::dontSendNotification);
+    lfoDivision.setTooltip ("Note length of one pad edge (A-B-D-C has four edges). T = triplet, D = dotted. At 1/4, one full orbit takes a bar of 4/4. CCW reverses the orbit. Follows host BPM; phase locks to the playhead while the transport runs.");
+    lfoDivision.onChange = [this]
+    {
+        if (hostParamSync)
+            return;
+        lfoDivisionChoice = juce::jmax (0, lfoDivision.getSelectedItemIndex());
+        if (onMorphLfoDivisionHostWrite)
+            onMorphLfoDivisionHostWrite (lfoDivisionChoice);
+        if (onMorphUiPrefsChanged)
+            onMorphUiPrefsChanged();
+    };
+    addChildComponent (lfoDivision);
 
     noteJumpLabel.setJustificationType (juce::Justification::centredLeft);
     noteJumpLabel.setFont (juce::FontOptions (12.0f));
@@ -128,7 +201,16 @@ MorpherPanel::MorpherPanel()
             if (noteJumpMode == m)
                 return;
             const auto prev = noteJumpMode;
-            setNoteJumpMode (m);
+            noteJumpMode = m;
+            if (m != NoteJumpMode::off)
+                lfoEnabled = false;
+            const int choice = static_cast<int> (m);
+            if (onMorphMotionHostWrite)
+                onMorphMotionHostWrite (choice);
+            else
+                setNoteJumpMode (m);
+            if (m != NoteJumpMode::off)
+                resumeEgressIfPaused();
             if (onMorphUiPrefsChanged)
                 onMorphUiPrefsChanged();
             if (prev == NoteJumpMode::off && m != NoteJumpMode::off && onNoteJumpArmed)
@@ -219,14 +301,6 @@ void MorpherPanel::setEgressPaused (bool paused)
         ensureTimerRunning();
 }
 
-void MorpherPanel::reemitCurrent()
-{
-    egressPaused = false;
-    lastSentVoice.reset();
-    emitMorph (false);
-    ensureTimerRunning();
-}
-
 void MorpherPanel::resumeEgressIfPaused()
 {
     if (! egressPaused)
@@ -235,14 +309,6 @@ void MorpherPanel::resumeEgressIfPaused()
         onPadGestureStarted();
     else
         setEgressPaused (false);
-}
-
-void MorpherPanel::stopMotionDrivers()
-{
-    if (lfoEnabled)
-        setLfoEnabled (false);
-    if (noteJumpMode != NoteJumpMode::off)
-        setNoteJumpMode (NoteJumpMode::off);
 }
 
 void MorpherPanel::setDefaultLockRefPosition (float x, float y)
@@ -316,10 +382,19 @@ bool MorpherPanel::applyNoteJump()
     return false;
 }
 
-void MorpherPanel::syncLfoUi()
+void MorpherPanel::syncLfoUi (bool relayout)
 {
     lfoToggle.setToggleState (lfoEnabled, juce::dontSendNotification);
+    lfoSync.setToggleState (lfoTempoSync, juce::dontSendNotification);
     lfoRate.setValue (lfoRateHz, juce::dontSendNotification);
+    lfoCcw.setToggleState (lfoRateHz < 0.0f, juce::dontSendNotification);
+    lfoDivision.setSelectedItemIndex (clampMorphLfoDivision (lfoDivisionChoice), juce::dontSendNotification);
+    lfoRate.setVisible (mode == Mode::morph && ! lfoTempoSync);
+    lfoRateLabel.setVisible (mode == Mode::morph && ! lfoTempoSync);
+    lfoCcw.setVisible (mode == Mode::morph && lfoTempoSync);
+    lfoDivision.setVisible (mode == Mode::morph && lfoTempoSync);
+    if (relayout)
+        resized();
 }
 
 void MorpherPanel::syncLockChipsFromFlags()
@@ -403,8 +478,11 @@ void MorpherPanel::setMode (Mode m)
     resetLocksBtn.setVisible (morph);
     setDefaultLocksBtn.setVisible (morph);
     lfoToggle.setVisible (morph);
-    lfoRate.setVisible (morph);
-    lfoRateLabel.setVisible (morph);
+    lfoSync.setVisible (morph);
+    lfoRate.setVisible (morph && ! lfoTempoSync);
+    lfoRateLabel.setVisible (morph && ! lfoTempoSync);
+    lfoCcw.setVisible (morph && lfoTempoSync);
+    lfoDivision.setVisible (morph && lfoTempoSync);
     noteJumpLabel.setVisible (morph);
     noteJumpOff.setVisible (morph);
     noteJumpRandom.setVisible (morph);
@@ -422,6 +500,8 @@ void MorpherPanel::setMode (Mode m)
     ensureTimerRunning();
     updateMorphControlsEnabled();
     resized();
+    if (! morph)
+        refreshPresetList();
     repaint();
 }
 
@@ -463,10 +543,14 @@ void MorpherPanel::updateMorphControlsEnabled()
     const bool morph = mode == Mode::morph;
     const bool on = morph && ready;
 
-    for (auto* c : { &lfoToggle, &noteJumpOff, &noteJumpRandom, &noteJumpEdges })
-        c->setEnabled (on);
+    lfoToggle.setEnabled (on);
+    lfoSync.setEnabled (on);
+    lfoCcw.setEnabled (on);
     lfoRate.setEnabled (on);
     lfoRateLabel.setEnabled (on);
+    lfoDivision.setEnabled (on);
+    for (auto* c : { &noteJumpOff, &noteJumpRandom, &noteJumpEdges })
+        c->setEnabled (on);
     noteJumpLabel.setEnabled (on);
     // Pad input is gated in mouse handlers; locks/assign stay usable while building corners.
 }
@@ -517,6 +601,8 @@ void MorpherPanel::clearCorners()
     lastSentVoice.reset();
     if (onMorphInvalidate)
         onMorphInvalidate();
+    if (onCornersCleared)
+        onCornersCleared();
     updateHint();
     updateMorphControlsEnabled();
     repaint();
@@ -526,7 +612,75 @@ void MorpherPanel::setMarkerPosition (float x, float y)
 {
     posX = juce::jlimit (0.0f, 1.0f, x);
     posY = juce::jlimit (0.0f, 1.0f, y);
-    emitMorph (false);
+    if (processorOwnsMotion && onMorphPositionHostWrite)
+        onMorphPositionHostWrite (posX, posY, false, false);
+    else
+        emitMorph (false);
+    repaint();
+}
+
+void MorpherPanel::setMarkerFromHost (float x, float y)
+{
+    hostParamSync = true;
+    posX = juce::jlimit (0.0f, 1.0f, x);
+    posY = juce::jlimit (0.0f, 1.0f, y);
+    lastSentVoice.reset();
+    hostParamSync = false;
+    repaint();
+}
+
+void MorpherPanel::setLockRefFromHost (float x, float y)
+{
+    hostParamSync = true;
+    lockRefX = juce::jlimit (0.0f, 1.0f, x);
+    lockRefY = juce::jlimit (0.0f, 1.0f, y);
+    hostParamSync = false;
+    repaint();
+}
+
+void MorpherPanel::syncMotionFromHost (int motionChoice, float rateHz, bool tempoSync, int division)
+{
+    hostParamSync = true;
+    const auto mapping = morphMotionFromChoice (motionChoice);
+    lfoEnabled = mapping.lfoEnabled;
+    noteJumpMode = static_cast<NoteJumpMode> (juce::jlimit (0, 2, mapping.noteJumpMode));
+    lfoRateHz = juce::jlimit (-1.5f, 1.5f, rateHz);
+    lfoTempoSync = tempoSync;
+    lfoDivisionChoice = clampMorphLfoDivision (division);
+    syncLfoUi (false);
+    syncNoteJumpUi();
+    updateHint();
+    updateMorphControlsEnabled();
+    if (! processorOwnsMotion)
+        ensureTimerRunning();
+    hostParamSync = false;
+    repaint();
+}
+
+void MorpherPanel::applyPresetSnapshot (const MorphPreset& p)
+{
+    corners[0] = p.a;
+    corners[1] = p.b;
+    corners[2] = p.c;
+    corners[3] = p.d;
+    cornerSet[0] = cornerSet[1] = cornerSet[2] = cornerSet[3] = true;
+    cornerNames[0] = juce::String::fromUTF8 (p.nameA.c_str());
+    cornerNames[1] = juce::String::fromUTF8 (p.nameB.c_str());
+    cornerNames[2] = juce::String::fromUTF8 (p.nameC.c_str());
+    cornerNames[3] = juce::String::fromUTF8 (p.nameD.c_str());
+    setMarkerFromHost (p.posX, p.posY);
+    lockGroups = p.lockGroups & morphLockAllGroups;
+    setLockRefFromHost (p.lockRefX, p.lockRefY);
+    syncLockChipsFromFlags();
+    lastSentVoice.reset();
+    lastLfoStep = -1;
+    lastTimerMs = juce::Time::getMillisecondCounter();
+    if (onMorphInvalidate)
+        onMorphInvalidate();
+    egressPaused = false;
+    updateHint();
+    updateMorphControlsEnabled();
+    ensureTimerRunning();
     repaint();
 }
 
@@ -601,8 +755,21 @@ void MorpherPanel::resized()
         constexpr int toggleRowH = 26;
         auto lfoRow = r.removeFromTop (toggleRowH);
         lfoToggle.setBounds (lfoRow.removeFromLeft (toggleWidthFor (lfoToggle, toggleRowH)).reduced (1));
-        lfoRateLabel.setBounds (lfoRow.removeFromLeft (36));
-        lfoRate.setBounds (lfoRow.reduced (1));
+        lfoSync.setBounds (lfoRow.removeFromLeft (toggleWidthFor (lfoSync, toggleRowH)).reduced (1));
+        if (lfoTempoSync)
+        {
+            lfoRateLabel.setBounds ({});
+            lfoRate.setBounds ({});
+            lfoCcw.setBounds (lfoRow.removeFromLeft (toggleWidthFor (lfoCcw, toggleRowH)).reduced (1));
+            lfoDivision.setBounds (lfoRow.reduced (1));
+        }
+        else
+        {
+            lfoCcw.setBounds ({});
+            lfoDivision.setBounds ({});
+            lfoRateLabel.setBounds (lfoRow.removeFromLeft (36));
+            lfoRate.setBounds (lfoRow.reduced (1));
+        }
 
         auto jumpRow = r.removeFromTop (toggleRowH);
         noteJumpLabel.setBounds (jumpRow.removeFromLeft (78));
@@ -633,6 +800,7 @@ void MorpherPanel::resized()
         r.removeFromTop (6);
         presetList.setBounds (r);
         padBounds = {};
+        refreshPresetList();
     }
 }
 
@@ -825,6 +993,14 @@ void MorpherPanel::commitLockRef()
     if (onMorphUiPrefsChanged)
         onMorphUiPrefsChanged();
     lastSentVoice.reset();
+    if (processorOwnsMotion && onLockRefHostWrite)
+    {
+        onLockRefHostWrite (lockRefX, lockRefY, false, true);
+        if (onStatus)
+            onStatus ("Lock reference @ " + juce::String (percent99 (lockRefX)) + "%, "
+                      + juce::String (percent99 (lockRefY)) + "%");
+        return;
+    }
     if (egressPaused)
     {
         if (onStatus)
@@ -900,6 +1076,8 @@ void MorpherPanel::mouseDown (const juce::MouseEvent& e)
         onPadGestureStarted();
     padDownPos = e.position;
     updatePositionFromPoint (e.position);
+    if (processorOwnsMotion && onMorphPositionHostWrite)
+        onMorphPositionHostWrite (posX, posY, true, false);
     repaint();
 }
 
@@ -922,7 +1100,12 @@ void MorpherPanel::mouseDrag (const juce::MouseEvent& e)
 
     updatePositionFromPoint (e.position);
     if (padDragging)
-        tryEmitDrag();
+    {
+        if (processorOwnsMotion && onMorphPositionHostWrite)
+            onMorphPositionHostWrite (posX, posY, false, false);
+        else
+            tryEmitDrag();
+    }
     repaint();
 }
 
@@ -960,20 +1143,29 @@ void MorpherPanel::mouseUp (const juce::MouseEvent& e)
 
     if (wasDrag)
     {
-        // Flush any throttled param-diff update first (ordered before the name dump).
-        if (hadPending)
+        if (processorOwnsMotion && onMorphPositionHostWrite)
         {
-            lastMorphEmitMs = juce::Time::getMillisecondCounter();
-            emitMorph (true);
+            lastSentVoice.reset();
+            onMorphPositionHostWrite (posX, posY, false, true);
         }
-        // Force a full dump so the morph name is written even if VoiceData matched lastSent.
-        lastSentVoice.reset();
-        lastMorphEmitMs = juce::Time::getMillisecondCounter();
-        emitMorph (false);
+        else
+        {
+            if (hadPending)
+            {
+                lastMorphEmitMs = juce::Time::getMillisecondCounter();
+                emitMorph (true);
+            }
+            lastSentVoice.reset();
+            lastMorphEmitMs = juce::Time::getMillisecondCounter();
+            emitMorph (false);
+        }
+    }
+    else if (processorOwnsMotion && onMorphPositionHostWrite)
+    {
+        onMorphPositionHostWrite (posX, posY, true, true);
     }
     else
     {
-        // Click: single full dump at the point.
         lastMorphEmitMs = juce::Time::getMillisecondCounter();
         emitMorph (false);
     }
@@ -988,38 +1180,26 @@ void MorpherPanel::updatePositionFromPoint (juce::Point<float> p)
     posY = juce::jlimit (0.0f, 1.0f, (p.y - (float) padBounds.getY()) / (float) padBounds.getHeight());
 }
 
-void MorpherPanel::edgePosition (float phase01, bool clockwise, float& x, float& y)
-{
-    float t = phase01 - std::floor (phase01);
-    if (! clockwise)
-        t = 1.0f - t;
-    const float s = t * 4.0f;
-    if (s < 1.0f) { x = s; y = 0.0f; }
-    else if (s < 2.0f) { x = 1.0f; y = s - 1.0f; }
-    else if (s < 3.0f) { x = 1.0f - (s - 2.0f); y = 1.0f; }
-    else { x = 0.0f; y = 1.0f - (s - 3.0f); }
-}
-
 void MorpherPanel::advanceLfo (double deltaSeconds)
 {
+    if (processorOwnsMotion)
+        return;
     if (! lfoEnabled || padDragging || lockRefDragging || mode != Mode::morph || ! allCornersReady()
         || egressPaused)
         return;
 
     lfoPhase += (float) (deltaSeconds * (double) lfoRateHz);
-    if (std::abs (lfoRateHz) < 0.02f)
+    if (std::abs (lfoRateHz) < kMorphLfoPauseHz)
         return;
-    // Quantize to discrete perimeter steps so MIDI only updates on musical ticks.
     const float wrapped = lfoPhase - std::floor (lfoPhase);
-    const int step = juce::jlimit (0, kLfoStepsPerLoop - 1,
-                                   (int) std::floor (wrapped * (float) kLfoStepsPerLoop));
+    const int step = juce::jlimit (0, kMorphLfoStepsPerLoop - 1,
+                                   (int) std::floor (wrapped * (float) kMorphLfoStepsPerLoop));
     if (step == lastLfoStep)
         return;
     lastLfoStep = step;
 
-    const float qPhase = ((float) step + 0.5f) / (float) kLfoStepsPerLoop;
-    // Direction comes from signed lfoPhase only — do not also mirror in edgePosition.
-    edgePosition (qPhase, true, posX, posY);
+    const float qPhase = ((float) step + 0.5f) / (float) kMorphLfoStepsPerLoop;
+    morphPadEdgePosition (qPhase, true, posX, posY);
     tryEmitDrag();
     repaint();
 }

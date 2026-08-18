@@ -1,5 +1,6 @@
 #include "PluginEditor.h"
 #include "BuildId.h"
+#include "host/MorphHostState.h"
 #include "library/PatchWriter.h"
 #include "sysex/SysexParser.h"
 #include "ui/ThemePalette.h"
@@ -43,16 +44,51 @@ FmLibPlugAudioProcessorEditor::FmLibPlugAudioProcessorEditor (FmLibPlugAudioProc
     devicePanel.setBuffer (&plugin.deviceBuffer);
     devicePanel.onStatus = [this] (const juce::String& s) { setMidiStatus (s); };
     morpher.setPresetStore (&plugin.morphPresets);
+    morpher.setProcessorOwnsMotion (true);
     morpher.setEmitIntervalMs (plugin.prefs.morphEmitMs);
     morpher.setDefaultLockGroups (plugin.prefs.morphLockGroups);
     morpher.setLockGroups (plugin.prefs.morphLockGroups);
     morpher.setDefaultLockRefPosition (plugin.prefs.morphLockRefX, plugin.prefs.morphLockRefY);
     morpher.setLockRefPosition (plugin.prefs.morphLockRefX, plugin.prefs.morphLockRefY);
-    morpher.setLfoEnabled (plugin.prefs.morphLfoEnabled);
-    morpher.setLfoRateHz (plugin.prefs.morphLfoRateHz);
-    morpher.setNoteJumpMode (static_cast<fmlib::MorpherPanel::NoteJumpMode> (
-        juce::jlimit (0, 2, plugin.prefs.morphNoteJumpMode)));
-    plugin.midi.setControllerNotesToCallbacksOnly (plugin.prefs.morphNoteJumpMode != 0);
+
+    if (plugin.allLiveCornersReady())
+        morpher.applyPresetSnapshot (plugin.getLiveMorph());
+    morpher.syncMotionFromHost (plugin.getMorphMotionChoice(), plugin.getMorphLfoRate(),
+                                plugin.getMorphLfoSync(), plugin.getMorphLfoDivision());
+
+    morpher.onMorphMotionHostWrite = [this] (int choice)
+    {
+        plugin.setMorphMotionChoice (choice, true);
+    };
+    morpher.onMorphLfoRateHostWrite = [this] (float hz)
+    {
+        plugin.setMorphLfoRateParam (hz, true);
+    };
+    morpher.onMorphLfoSyncHostWrite = [this] (bool sync)
+    {
+        plugin.setMorphLfoSyncParam (sync, true);
+    };
+    morpher.onMorphLfoDivisionHostWrite = [this] (int division)
+    {
+        plugin.setMorphLfoDivisionParam (division, true);
+    };
+    morpher.onMorphPositionHostWrite = [this] (float x, float y, bool begin, bool end)
+    {
+        plugin.setMorphPosition (x, y, begin, end);
+    };
+    morpher.onLockRefHostWrite = [this] (float x, float y, bool begin, bool end)
+    {
+        plugin.setLockRefPosition (x, y, begin, end);
+        if (end)
+            plugin.applyLiveMorph (false, true);
+    };
+    morpher.onCornersCleared = [this] { plugin.clearLiveCorners(); };
+
+    plugin.setMorphUiSyncCallback ([safe = juce::Component::SafePointer<FmLibPlugAudioProcessorEditor> (this)]
+    {
+        if (safe != nullptr)
+            safe->syncMorphPanelFromProcessor();
+    });
 
     plugin.library.addListener ([safe = juce::Component::SafePointer<FmLibPlugAudioProcessorEditor> (this)]
     {
@@ -70,58 +106,6 @@ FmLibPlugAudioProcessorEditor::FmLibPlugAudioProcessorEditor (FmLibPlugAudioProc
             safe->setMidiStatus (s);
         });
     });
-
-    plugin.midi.setControllerNoteOnCallback (
-        [safe = juce::Component::SafePointer<FmLibPlugAudioProcessorEditor> (this)] (int note, int velocity)
-        {
-            juce::MessageManager::callAsync ([safe, note, velocity]
-            {
-                if (safe == nullptr)
-                    return;
-                const bool jumpOn = safe->morpher.getNoteJumpMode() != fmlib::MorpherPanel::NoteJumpMode::off;
-                const bool firstOfPhrase = safe->controllerHeldNotes.empty();
-                safe->controllerHeldNotes.insert (note);
-
-                if (jumpOn)
-                {
-                    // Morph before the note so the new voice is on the wire when it sounds.
-                    // Chord tones during lead-in join the same delayed batch.
-                    if (firstOfPhrase || safe->plugin.hasPendingControllerLeadIn())
-                    {
-                        if (firstOfPhrase)
-                        {
-                            // The incoming note masks any release tail, so don't hold the dump.
-                            safe->resumeMorphPerformance();
-                            safe->plugin.midi.cancelMorphReleaseGuard();
-                            safe->morpher.applyNoteJump();
-                        }
-                        safe->plugin.playControllerNoteAfterDelay (note, velocity, safe->morphNoteLeadMs());
-                    }
-                    else
-                    {
-                        safe->plugin.playControllerNote (note, velocity);
-                    }
-                }
-                else if (! safe->plugin.prefs.midiControllerThru)
-                {
-                    safe->plugin.playControllerNote (note, velocity);
-                }
-            });
-        });
-    plugin.midi.setControllerNoteOffCallback (
-        [safe = juce::Component::SafePointer<FmLibPlugAudioProcessorEditor> (this)] (int note, int)
-        {
-            juce::MessageManager::callAsync ([safe, note]
-            {
-                if (safe == nullptr)
-                    return;
-                const bool jumpOn = safe->morpher.getNoteJumpMode() != fmlib::MorpherPanel::NoteJumpMode::off;
-                safe->controllerHeldNotes.erase (note);
-                if (jumpOn || ! safe->plugin.prefs.midiControllerThru)
-                    safe->plugin.releaseControllerNote (note);
-                // Next jump happens on the next note-on, with its own SysEx lead-in.
-            });
-        });
 
     browser.setLoadCallback ([this] (const fmlib::PatchEntry& e, bool loadBank)
     {
@@ -204,12 +188,10 @@ FmLibPlugAudioProcessorEditor::FmLibPlugAudioProcessorEditor (FmLibPlugAudioProc
 
     morpher.onMorph = [this] (const fmlib::VoiceData& v, bool dragEmit, bool liveAllParams)
     {
-        // Drag/LFO: stream under budget. Click / drag-end / jump: commit (full dump when idle).
-        // Lock-ref: liveAllParams so EG/level locks update a held note in Frequency-only mode.
+        juce::ignoreUnused (v);
         if (liveAllParams)
             plugin.midi.cancelMorphReleaseGuard();
-        plugin.midi.sendMorphVoice (v, ! dragEmit, liveAllParams);
-        plugin.rememberEditBufferVoice (v);
+        plugin.applyLiveMorph (dragEmit, liveAllParams);
     };
     // Driving the pad by hand outranks the release hold: a click you asked for beats a
     // pad that ignores you for the length of the hold.
@@ -222,25 +204,29 @@ FmLibPlugAudioProcessorEditor::FmLibPlugAudioProcessorEditor (FmLibPlugAudioProc
     morpher.onPresetsChanged = [this] { plugin.persistMorphPresets(); };
     morpher.onMorphUiPrefsChanged = [this]
     {
-        // Persist LFO / note-jump and lock *defaults* (Set default updates those).
         plugin.prefs.morphLockGroups = morpher.getDefaultLockGroups();
         plugin.prefs.morphLockRefX = morpher.getDefaultLockRefX();
         plugin.prefs.morphLockRefY = morpher.getDefaultLockRefY();
-        plugin.prefs.morphLfoEnabled = morpher.getLfoEnabled();
-        plugin.prefs.morphLfoRateHz = morpher.getLfoRateHz();
-        plugin.prefs.morphNoteJumpMode = static_cast<int> (morpher.getNoteJumpMode());
-        plugin.midi.setControllerNotesToCallbacksOnly (plugin.prefs.morphNoteJumpMode != 0);
+        const auto mapping = fmlib::morphMotionFromChoice (plugin.getMorphMotionChoice());
+        plugin.prefs.morphLfoEnabled = mapping.lfoEnabled;
+        plugin.prefs.morphNoteJumpMode = mapping.noteJumpMode;
+        plugin.prefs.morphLfoRateHz = plugin.getMorphLfoRate();
+        plugin.prefs.morphLfoTempoSync = plugin.getMorphLfoSync();
+        plugin.prefs.morphLfoDivision = plugin.getMorphLfoDivision();
+        plugin.setLiveLockGroups (morpher.getLockGroups());
         plugin.persistPreferences();
     };
     morpher.onNoteJumpArmed = [this]
     {
-        if (controllerHeldNotes.empty())
+        if (! plugin.hasControllerNotesHeld())
             prepareNextMorphJump();
     };
     morpher.onPresetApplied = [this]
     {
         morphPaused = false;
+        plugin.setMorphEgressPaused (false);
         morpher.setEgressPaused (false);
+        plugin.applyLiveMorphPreset (morpher.currentAsPreset ({}));
     };
     morpher.onSaveToDeviceSlot = [this] (const fmlib::VoiceData& voice, int slot1to32)
     {
@@ -273,6 +259,7 @@ FmLibPlugAudioProcessorEditor::FmLibPlugAudioProcessorEditor (FmLibPlugAudioProc
     {
         if (auto sel = browser.getSelectedVoice())
         {
+            plugin.setLiveCorner (corner, sel->voice, fmlib::toJuce (sel->voiceName));
             morpher.setCorner (corner, sel->voice, fmlib::toJuce (sel->voiceName));
             setMidiStatus ("Assigned corner " + juce::String::charToString (static_cast<juce::juce_wchar> ('A' + corner))
                                 + " <- " + fmlib::toJuce (sel->voiceName));
@@ -310,7 +297,8 @@ FmLibPlugAudioProcessorEditor::FmLibPlugAudioProcessorEditor (FmLibPlugAudioProc
     settings.onRefreshMidi = [this]
     {
         plugin.midi.refreshDevices();
-        settings.setMidiLists (plugin.midi.getInputNames(), plugin.midi.getOutputNames());
+        settings.setMidiLists (plugin.midi.getInputNames (plugin.showDawMidiPorts()),
+                               plugin.midi.getOutputNames (plugin.showDawMidiPorts()));
     };
     settings.onRescan = [this]
     {
@@ -410,7 +398,8 @@ FmLibPlugAudioProcessorEditor::FmLibPlugAudioProcessorEditor (FmLibPlugAudioProc
     };
 
     settings.setLibraryFolders (plugin.prefs.libraryFolders);
-    settings.setMidiLists (plugin.midi.getInputNames(), plugin.midi.getOutputNames());
+    settings.setMidiLists (plugin.midi.getInputNames (plugin.showDawMidiPorts()),
+                           plugin.midi.getOutputNames (plugin.showDawMidiPorts()));
     settings.setMidiSelection (plugin.prefs.midiInputName, plugin.prefs.midiOutputName,
                                plugin.prefs.midiControllerInputName);
     settings.setChannel (plugin.prefs.midiChannel);
@@ -428,6 +417,7 @@ FmLibPlugAudioProcessorEditor::FmLibPlugAudioProcessorEditor (FmLibPlugAudioProc
     settings.setAuditionVelocity (plugin.prefs.auditionVelocity);
     settings.setAuditionDurationMs (plugin.prefs.auditionDurationMs);
 
+    syncMorphPanelFromProcessor();
     refreshLibraryView();
     updateModeButtons();
     // Tall enough for 32 device-buffer rows; user can resize further in supporting hosts.
@@ -438,18 +428,23 @@ FmLibPlugAudioProcessorEditor::FmLibPlugAudioProcessorEditor (FmLibPlugAudioProc
     setSize (1100, 900);
     syncTooltipWindow();
     startTimerHz (4);
+    if (plugin.lastEditorPage == 1)
+        showSettingsMode();
+    else if (plugin.lastEditorPage == 2)
+        showMorphMode();
 }
 
 FmLibPlugAudioProcessorEditor::~FmLibPlugAudioProcessorEditor()
 {
+    plugin.lastEditorPage = uiMode == UiMode::settings ? 1 : (uiMode == UiMode::morph ? 2 : 0);
+    plugin.lastMorpherPresetsPage = morpher.getMode() == fmlib::MorpherPanel::Mode::presets ? 1 : 0;
     browser.getTable().removeKeyListener (this);
     devicePanel.getList().removeKeyListener (this);
     applyAuditionHoldAction (auditionHoldInputs.forceStop());
     plugin.releaseAllControllerNotes();
     plugin.library.clearListeners();
     plugin.midi.setStatusCallback (nullptr);
-    plugin.midi.setControllerNoteOnCallback (nullptr);
-    plugin.midi.setControllerNoteOffCallback (nullptr);
+    plugin.setMorphUiSyncCallback (nullptr);
     setLookAndFeel (nullptr);
 }
 
@@ -491,6 +486,28 @@ void FmLibPlugAudioProcessorEditor::updateStatusBar()
         status.setText (counts, juce::dontSendNotification);
 }
 
+void FmLibPlugAudioProcessorEditor::syncMorphPanelFromProcessor()
+{
+    const auto& live = plugin.getLiveMorph();
+    const int motion = plugin.getMorphMotionChoice();
+    const bool cornersReady = plugin.allLiveCornersReady();
+    const bool full = motion != lastSyncedMotion
+                   || live.lockGroups != lastSyncedLockGroups
+                   || cornersReady != lastSyncedCornersReady;
+    morpher.setMarkerFromHost (live.posX, live.posY);
+    morpher.setLockRefFromHost (live.lockRefX, live.lockRefY);
+    if (! full)
+        return;
+
+    lastSyncedMotion = motion;
+    lastSyncedLockGroups = live.lockGroups;
+    lastSyncedCornersReady = cornersReady;
+    morpher.syncMotionFromHost (motion, plugin.getMorphLfoRate(),
+                                plugin.getMorphLfoSync(), plugin.getMorphLfoDivision());
+    if (cornersReady)
+        morpher.applyPresetSnapshot (live);
+}
+
 void FmLibPlugAudioProcessorEditor::syncAuditionPrefsFromSettings()
 {
     plugin.prefs.auditionNote = settings.getAuditionNote();
@@ -501,22 +518,18 @@ void FmLibPlugAudioProcessorEditor::syncAuditionPrefsFromSettings()
 void FmLibPlugAudioProcessorEditor::endMorphPerformance()
 {
     morphPaused = false;
+    plugin.setMorphEgressPaused (false);
     morpher.setEgressPaused (false);
-    morpher.stopMotionDrivers();
-    plugin.prefs.morphLfoEnabled = false;
-    plugin.prefs.morphNoteJumpMode = 0;
-    plugin.midi.setControllerNotesToCallbacksOnly (false);
+    plugin.setMorphMotionChoice (static_cast<int> (fmlib::MorphMotionMode::off), true);
     plugin.midi.invalidateMorphBaseline();
 }
 
 void FmLibPlugAudioProcessorEditor::pauseMorphPerformance()
 {
     morphPaused = true;
+    plugin.setMorphEgressPaused (true);
     morpher.setEgressPaused (true);
-    morpher.stopMotionDrivers();
-    plugin.prefs.morphLfoEnabled = false;
-    plugin.prefs.morphNoteJumpMode = 0;
-    plugin.midi.setControllerNotesToCallbacksOnly (false);
+    plugin.setMorphMotionChoice (static_cast<int> (fmlib::MorphMotionMode::off), true);
     setMidiStatus ("Morph paused");
 }
 
@@ -525,10 +538,12 @@ void FmLibPlugAudioProcessorEditor::resumeMorphPerformance()
     if (! morphPaused && ! morpher.isEgressPaused())
         return;
     morphPaused = false;
+    plugin.setMorphEgressPaused (false);
     if (morpher.allCornersReady())
     {
         plugin.midi.cancelMorphReleaseGuard();
-        morpher.reemitCurrent();
+        plugin.applyLiveMorph (false, false);
+        morpher.setEgressPaused (false);
         setMidiStatus ("Morph resumed");
     }
     else
@@ -584,6 +599,7 @@ void FmLibPlugAudioProcessorEditor::handleMenuAudition (const fmlib::PatchEntry&
 
 void FmLibPlugAudioProcessorEditor::assignMorphCorner (int corner0to3, const fmlib::PatchEntry& e)
 {
+    plugin.setLiveCorner (corner0to3, e.voice, fmlib::toJuce (e.voiceName));
     morpher.setCorner (corner0to3, e.voice, fmlib::toJuce (e.voiceName));
     setMidiStatus ("Assigned corner "
                    + juce::String::charToString (static_cast<juce::juce_wchar> ('A' + corner0to3))
@@ -593,11 +609,12 @@ void FmLibPlugAudioProcessorEditor::assignMorphCorner (int corner0to3, const fml
 void FmLibPlugAudioProcessorEditor::startAuditionHold()
 {
     syncAuditionPrefsFromSettings();
-    if (morpher.getNoteJumpMode() != fmlib::MorpherPanel::NoteJumpMode::off && morpher.allCornersReady())
+    if (plugin.getMorphMotionChoice() != static_cast<int> (fmlib::MorphMotionMode::off)
+        && morpher.allCornersReady())
     {
         resumeMorphPerformance();
         plugin.midi.cancelMorphReleaseGuard();
-        morpher.applyNoteJump();
+        plugin.applyNoteJump();
         plugin.auditionHoldStart (morphNoteLeadMs());
     }
     else
@@ -677,11 +694,11 @@ int FmLibPlugAudioProcessorEditor::morphNoteLeadMs() const
 
 void FmLibPlugAudioProcessorEditor::prepareNextMorphJump()
 {
-    if (morpher.getNoteJumpMode() == fmlib::MorpherPanel::NoteJumpMode::off)
+    if (plugin.getMorphMotionChoice() == static_cast<int> (fmlib::MorphMotionMode::off))
         return;
-    if (! controllerHeldNotes.empty())
+    if (plugin.hasControllerNotesHeld())
         return;
-    morpher.applyNoteJump();
+    plugin.applyNoteJump();
 }
 
 void FmLibPlugAudioProcessorEditor::syncMidiParamsFromSettings (bool persist)
@@ -768,7 +785,8 @@ void FmLibPlugAudioProcessorEditor::showMorphMode()
     morpher.setVisible (true);
     browser.setVisible (true);
     devicePanel.setVisible (false);
-    morpher.setMode (fmlib::MorpherPanel::Mode::morph);
+    morpher.setMode (plugin.lastMorpherPresetsPage != 0 ? fmlib::MorpherPanel::Mode::presets
+                                                       : fmlib::MorpherPanel::Mode::morph);
     updateModeButtons();
     resized();
 }
