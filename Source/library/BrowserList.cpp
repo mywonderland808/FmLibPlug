@@ -10,7 +10,7 @@ std::vector<PatchEntry> BrowserList::sortGrouped (std::vector<PatchEntry> entrie
     std::sort (entries.begin(), entries.end(), [] (const PatchEntry& a, const PatchEntry& b)
     {
         if (a.absolutePath != b.absolutePath)
-            return a.absolutePath.string() < b.absolutePath.string();
+            return a.absolutePath < b.absolutePath;
         const int sa = a.bankSlot > 0 ? a.bankSlot : 999;
         const int sb = b.bankSlot > 0 ? b.bankSlot : 999;
         if (sa != sb)
@@ -74,43 +74,59 @@ BrowserFilterResult BrowserList::filterForBrowser (const std::vector<PatchEntry>
                                                    const TagStore* tags,
                                                    const std::unordered_set<uint64_t>* recentIds)
 {
-    std::vector<PatchEntry> scoped;
-    scoped.reserve (all.size());
-    for (const auto& e : all)
+    auto inScope = [scope] (const PatchEntry& e)
     {
         switch (scope)
         {
             case BrowserScope::bankFiles:
-                if (isBankFileVoice (e))
-                    scoped.push_back (e);
-                break;
+                return isBankFileVoice (e);
             case BrowserScope::allVoices:
-                scoped.push_back (e);
-                break;
+                return true;
             case BrowserScope::singleSysex:
-                if (! isBankFileVoice (e))
-                    scoped.push_back (e);
-                break;
+                return ! isBankFileVoice (e);
         }
-    }
+        return true;
+    };
 
     std::unordered_map<uint64_t, int> counts;
-    counts.reserve (scoped.size());
-    for (const auto& e : scoped)
+    counts.reserve (all.size());
+    int total = 0;
+    for (const auto& e : all)
+    {
+        if (! inScope (e))
+            continue;
+        ++total;
         ++counts[e.contentId];
+    }
 
     int dupeVoices = 0;
-    for (const auto& e : scoped)
-        if (counts[e.contentId] >= 2)
-            ++dupeVoices;
+    for (const auto& [id, n] : counts)
+        if (n >= 2)
+            dupeVoices += n;
 
     BrowserFilterResult out;
-    out.stats.totalInScope = static_cast<int> (scoped.size());
+    out.stats.totalInScope = total;
     out.stats.duplicates = dupeVoices;
 
-    auto voices = LibraryFilter::apply (std::move (scoped), query, favorites, tags, recentIds);
-    out.stats.shown = static_cast<int> (voices.size());
-    out.voices = std::move (voices);
+    const bool noExpr = query.orGroups.empty() && ! query.favoritesOnly && ! query.duplicatesOnly;
+    out.voices.reserve (static_cast<size_t> (total));
+    if (noExpr)
+    {
+        for (const auto& e : all)
+            if (inScope (e))
+                out.voices.push_back (e);
+    }
+    else
+    {
+        std::vector<PatchEntry> scoped;
+        scoped.reserve (static_cast<size_t> (total));
+        for (const auto& e : all)
+            if (inScope (e))
+                scoped.push_back (e);
+        out.voices = LibraryFilter::apply (std::move (scoped), query, favorites, tags, recentIds);
+    }
+
+    out.stats.shown = static_cast<int> (out.voices.size());
     return out;
 }
 

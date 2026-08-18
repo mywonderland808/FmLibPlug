@@ -26,7 +26,7 @@ public:
     std::vector<PatchEntry> getEntriesCopy() const;
     int getSkippedFileCount() const { return skippedFiles.load(); }
 
-    void addListener (Listener l) { listeners.push_back (std::move (l)); }
+    void addListener (Listener l);
     void clearListeners() { listeners.clear(); }
 
 private:
@@ -40,7 +40,6 @@ private:
     std::atomic<int> skippedFiles { 0 };
     std::thread worker;
     std::vector<Listener> listeners;
-    FolderScanner::Result pending;
 };
 
 } // namespace fmlib

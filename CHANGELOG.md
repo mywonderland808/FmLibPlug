@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Duplicate detection hashes canonical packed voice parameters (ignores unused VCED bits and the 10-character name), so the same sound in another bank/slot is a dupe. Existing favorites/tags keyed to the old hash need a re-star / re-tag.
+- Library scan reads files in one pass and skips `.git`; list rebuild sorts by index and caches name keys so large libraries stay responsive.
 
 ## [1.2.1] - 2026-08-17
 

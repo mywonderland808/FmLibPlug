@@ -17,6 +17,11 @@ void PatchLibrary::setBaseFolders (std::vector<std::filesystem::path> folders)
     baseFolders = std::move (folders);
 }
 
+void PatchLibrary::addListener (Listener l)
+{
+    listeners.push_back (std::move (l));
+}
+
 void PatchLibrary::rescanAsync()
 {
     if (scanning.exchange (true))
@@ -32,7 +37,8 @@ void PatchLibrary::rescanAsync()
         auto result = scanner.scan (baseFolders, &cancel);
         {
             std::lock_guard lock (mutex);
-            pending = std::move (result);
+            skippedFiles = result.filesSkipped;
+            entries = std::move (result.entries);
         }
         scanning = false;
         triggerAsyncUpdate();
@@ -47,12 +53,6 @@ std::vector<PatchEntry> PatchLibrary::getEntriesCopy() const
 
 void PatchLibrary::handleAsyncUpdate()
 {
-    {
-        std::lock_guard lock (mutex);
-        entries = std::move (pending.entries);
-        skippedFiles = pending.filesSkipped;
-        pending = {};
-    }
     for (auto& l : listeners)
         if (l)
             l();

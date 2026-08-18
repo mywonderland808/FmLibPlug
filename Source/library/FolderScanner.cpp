@@ -1,7 +1,9 @@
 #include "library/FolderScanner.h"
+#include "sysex/Dx7Formats.h"
 #include "sysex/FormatDetect.h"
 #include "util/StringUtils.h"
 #include <fstream>
+#include <vector>
 
 namespace fmlib
 {
@@ -12,6 +14,20 @@ bool isSyxExtension (const std::filesystem::path& p)
 {
     const auto ext = asciiLower (p.extension().string());
     return ext == ".syx" || ext == ".dx7";
+}
+
+bool readFileBytes (const std::filesystem::path& path, std::vector<uint8_t>& bytes)
+{
+    std::error_code ec;
+    const auto sz = std::filesystem::file_size (path, ec);
+    if (ec || sz < static_cast<uintmax_t> (kPackedVoiceBytes) || sz > 8ull * 1024ull * 1024ull)
+        return false;
+    std::ifstream in (path, std::ios::binary);
+    if (! in)
+        return false;
+    bytes.resize (static_cast<size_t> (sz));
+    in.read (reinterpret_cast<char*> (bytes.data()), static_cast<std::streamsize> (sz));
+    return static_cast<uintmax_t> (in.gcount()) == sz;
 }
 } // namespace
 
@@ -39,19 +55,25 @@ FolderScanner::Result FolderScanner::scan (const std::vector<std::filesystem::pa
                 ec.clear();
                 continue;
             }
+            if (it->is_directory())
+            {
+                const auto name = it->path().filename();
+                if (name == ".git" || name == ".svn")
+                    it.disable_recursion_pending();
+                continue;
+            }
             if (! it->is_regular_file())
                 continue;
             if (! isSyxExtension (it->path()))
                 continue;
 
             ++result.filesScanned;
-            std::ifstream in (it->path(), std::ios::binary);
-            if (! in)
+            std::vector<uint8_t> bytes;
+            if (! readFileBytes (it->path(), bytes))
             {
                 ++result.filesSkipped;
                 continue;
             }
-            std::vector<uint8_t> bytes ((std::istreambuf_iterator<char> (in)), std::istreambuf_iterator<char>());
             const auto parsed = FormatDetect::parseSupported (bytes.data(), bytes.size());
             if (parsed.voices.empty())
             {
@@ -78,10 +100,13 @@ FolderScanner::Result FolderScanner::scan (const std::vector<std::filesystem::pa
                 ++result.voicesFound;
             }
 
-            if (progress)
+            if (progress && (result.filesScanned & 31) == 0)
                 progress (result.filesScanned, result.voicesFound, result.filesSkipped);
         }
     }
+
+    if (progress)
+        progress (result.filesScanned, result.voicesFound, result.filesSkipped);
 
     return result;
 }

@@ -21,6 +21,8 @@ struct PatchEntry
     int bankSlot = -1; // 1..32 or -1
     VoiceData voice {};
     uint64_t contentId = 0;
+    /** Cached BrowserList::nameSortKey (filled by refreshSearchCache). */
+    std::string nameSortKey;
 
     void refreshSearchCache();
 };
