@@ -25,6 +25,15 @@ void appendUnpackedBank (ParseResult& result, const uint8_t* packed4096)
     }
 }
 
+void appendPackedSingle (ParseResult& result, const uint8_t* packed128)
+{
+    PackedVoice packed {};
+    std::memcpy (packed.data(), packed128, kPackedVoiceBytes);
+    ParsedVoice pv;
+    pv.data = unpackVoice (packed);
+    result.voices.push_back (pv);
+}
+
 void handleYamahaMessage (ParseResult& result, const uint8_t* msg, size_t len)
 {
     // F0 43 ch format ... F7
@@ -104,6 +113,13 @@ ParseResult SysexParser::parseBytes (const uint8_t* data, size_t size)
     if (looksLikeHeaderlessBank (size))
     {
         appendUnpackedBank (result, data);
+        result.messagesFound = 1;
+        return result;
+    }
+
+    if (size == static_cast<size_t> (kPackedVoiceBytes))
+    {
+        appendPackedSingle (result, data);
         result.messagesFound = 1;
         return result;
     }

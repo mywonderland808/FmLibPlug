@@ -1,6 +1,5 @@
 #include "sysex/FormatDetect.h"
 #include "util/StringUtils.h"
-#include <cstring>
 #include <fstream>
 
 namespace fmlib
@@ -113,39 +112,9 @@ FormatDetectResult FormatDetect::detectFile (const std::filesystem::path& path)
     return r;
 }
 
-ParseResult FormatDetect::parseSupported (const uint8_t* data, size_t size, const std::filesystem::path& hintPath)
+ParseResult FormatDetect::parseSupported (const uint8_t* data, size_t size)
 {
     auto det = detect (data, size);
-    if (lowerExt (hintPath) == ".dx7")
-    {
-        if (size == static_cast<size_t> (kPackedBankBytes))
-        {
-            ParseResult result;
-            for (int i = 0; i < kBankVoiceCount; ++i)
-            {
-                PackedVoice packed {};
-                std::memcpy (packed.data(), data + i * kPackedVoiceBytes, kPackedVoiceBytes);
-                ParsedVoice pv;
-                pv.data = unpackVoice (packed);
-                pv.bankSlot = i + 1;
-                result.voices.push_back (pv);
-            }
-            result.messagesFound = 1;
-            return result;
-        }
-        if (size == static_cast<size_t> (kPackedVoiceBytes))
-        {
-            ParseResult result;
-            PackedVoice packed {};
-            std::memcpy (packed.data(), data, kPackedVoiceBytes);
-            ParsedVoice pv;
-            pv.data = unpackVoice (packed);
-            result.voices.push_back (pv);
-            result.messagesFound = 1;
-            return result;
-        }
-    }
-
     if (! det.supported)
     {
         ParseResult result;

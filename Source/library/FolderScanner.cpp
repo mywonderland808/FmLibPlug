@@ -52,7 +52,7 @@ FolderScanner::Result FolderScanner::scan (const std::vector<std::filesystem::pa
                 continue;
             }
             std::vector<uint8_t> bytes ((std::istreambuf_iterator<char> (in)), std::istreambuf_iterator<char>());
-            const auto parsed = FormatDetect::parseSupported (bytes.data(), bytes.size(), it->path());
+            const auto parsed = FormatDetect::parseSupported (bytes.data(), bytes.size());
             if (parsed.voices.empty())
             {
                 ++result.filesSkipped;

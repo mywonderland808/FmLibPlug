@@ -17,7 +17,7 @@ TEST_CASE ("FormatDetect dexed dx7 bank fixture", "[sysex][formats][detect]")
 
     std::ifstream in (path, std::ios::binary);
     std::vector<uint8_t> bytes ((std::istreambuf_iterator<char> (in)), std::istreambuf_iterator<char>());
-    const auto parsed = FormatDetect::parseSupported (bytes.data(), bytes.size(), path);
+    const auto parsed = FormatDetect::parseSupported (bytes.data(), bytes.size());
     REQUIRE (parsed.voices.size() == 32);
 }
 

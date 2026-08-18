@@ -34,7 +34,7 @@ public:
     static FormatDetectResult detectFile (const std::filesystem::path& path);
 
     /** Parse supported formats into ParseResult; unsupported returns empty with error set. */
-    static ParseResult parseSupported (const uint8_t* data, size_t size, const std::filesystem::path& hintPath = {});
+    static ParseResult parseSupported (const uint8_t* data, size_t size);
 };
 
 } // namespace fmlib

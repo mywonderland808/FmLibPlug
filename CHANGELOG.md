@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Dexed 128-byte packed singles and concatenated 1-voice SysEx parse as `bankSlot == -1` instead of a 32-voice bank.
+
 ## [1.2.1] - 2026-08-17
 
 ### Added
