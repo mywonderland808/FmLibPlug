@@ -219,6 +219,7 @@ if(FMLIBPLUG_BUILD_TESTS)
     Tests/unit/HostIntegrationTests.cpp
     Tests/unit/MidiHostRoutingTests.cpp
     Tests/unit/AuditionHoldInputsTests.cpp
+    Tests/unit/PatchLibraryTests.cpp
     Source/sysex/Dx7Formats.cpp
     Source/sysex/SysexParser.cpp
     Source/sysex/SysexMessages.cpp
@@ -235,6 +236,7 @@ if(FMLIBPLUG_BUILD_TESTS)
     Source/library/AutoTagger.cpp
     Source/library/RecentStore.cpp
     Source/library/PatchEntry.cpp
+    Source/library/PatchLibrary.cpp
     Source/library/MorphPresetStore.cpp
     Source/library/MorphPresetXml.cpp
     Source/library/DeviceBuffer.cpp

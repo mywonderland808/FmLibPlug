@@ -566,19 +566,8 @@ void FmLibPlugAudioProcessorEditor::handleLibraryVoiceLoad (const fmlib::PatchEn
     endMorphPerformance();
     if (loadBank && e.bankSlot > 0)
     {
-        auto all = plugin.library.getEntriesCopy();
-        std::array<fmlib::VoiceData, fmlib::kBankVoiceCount> bank {};
-        int found = 0;
-        for (const auto& x : all)
-        {
-            if (x.absolutePath == e.absolutePath && x.bankSlot >= 1 && x.bankSlot <= fmlib::kBankVoiceCount)
-            {
-                bank[static_cast<size_t> (x.bankSlot - 1)] = x.voice;
-                ++found;
-            }
-        }
-        if (found == fmlib::kBankVoiceCount)
-            plugin.midi.sendBank (bank);
+        if (auto bank = plugin.library.getBankVoices (e.absolutePath))
+            plugin.midi.sendBank (*bank);
         else
             plugin.sendVoice (e.voice);
     }
