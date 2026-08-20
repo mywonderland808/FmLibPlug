@@ -87,6 +87,8 @@ target_sources(FmLibPlug
     Source/midi/MorphTransport.cpp
     Source/ui/PatchBrowser.cpp
     Source/ui/DeviceBufferPanel.cpp
+    Source/ui/GlobalsPanel.cpp
+    Source/ui/TxSystemPanel.cpp
     Source/ui/SettingsPanel.cpp
     Source/ui/LookAndFeel_FmLibPlug.cpp
     Source/ui/MorpherPanel.cpp

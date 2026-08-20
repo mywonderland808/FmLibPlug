@@ -2,10 +2,12 @@
 
 #include "PluginProcessor.h"
 #include "ui/DeviceBufferPanel.h"
+#include "ui/GlobalsPanel.h"
 #include "ui/LookAndFeel_FmLibPlug.h"
 #include "ui/MorpherPanel.h"
 #include "ui/PatchBrowser.h"
 #include "ui/SettingsPanel.h"
+#include "ui/TxSystemPanel.h"
 #include "util/AuditionHoldInputs.h"
 
 class FmLibPlugAudioProcessorEditor : public juce::AudioProcessorEditor,
@@ -35,6 +37,7 @@ private:
     void showLibraryMode();
     void showSettingsMode();
     void showMorphMode();
+    void showGlobalsMode();
     void restoreListFocus();
     void syncMorphPanelFromProcessor();
     void syncAuditionPrefsFromSettings();
@@ -69,12 +72,15 @@ private:
     juce::TextButton settingsBtn { "Settings" };
     juce::TextButton auditionBtn { "Audition" };
     juce::TextButton morphBtn { "Morph" };
+    juce::TextButton globalsBtn { "Globals" };
     juce::Label status;
     fmlib::PatchBrowser browser;
     fmlib::DeviceBufferPanel devicePanel;
+    fmlib::GlobalsPanel globalsPanel;
     fmlib::SettingsPanel settings;
     fmlib::MorpherPanel morpher;
-    enum class UiMode { library, settings, morph };
+    fmlib::TxSystemPanel txSystem;
+    enum class UiMode { library, settings, morph, globals };
     UiMode uiMode = UiMode::library;
     enum class ListFocus { browser, device };
     ListFocus lastListFocus = ListFocus::browser;

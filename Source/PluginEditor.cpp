@@ -24,11 +24,14 @@ FmLibPlugAudioProcessorEditor::FmLibPlugAudioProcessorEditor (FmLibPlugAudioProc
     addAndMakeVisible (settingsBtn);
     addAndMakeVisible (auditionBtn);
     addAndMakeVisible (morphBtn);
+    addAndMakeVisible (globalsBtn);
     addAndMakeVisible (status);
     addAndMakeVisible (browser);
     addAndMakeVisible (devicePanel);
+    addAndMakeVisible (globalsPanel);
     addChildComponent (settings);
     addChildComponent (morpher);
+    addChildComponent (txSystem);
     // Theme chrome after children are parented so Settings finds our LookAndFeel.
     syncChromeColours();
     setWantsKeyboardFocus (true);
@@ -37,12 +40,53 @@ FmLibPlugAudioProcessorEditor::FmLibPlugAudioProcessorEditor (FmLibPlugAudioProc
 
     settingsBtn.setClickingTogglesState (true);
     morphBtn.setClickingTogglesState (true);
+    globalsBtn.setClickingTogglesState (true);
     auditionBtn.setTooltip ("Hold to play the audition note (release to stop). Keyboard: hold A.");
     settingsBtn.setTooltip ("Open Settings.");
     morphBtn.setTooltip ("Toggle Morph pad <-> Device buffer.");
+    globalsBtn.setTooltip ("TX7 machine Globals (note limits, MIDI switches, Memory Protect).");
 
     devicePanel.setBuffer (&plugin.deviceBuffer);
     devicePanel.onStatus = [this] (const juce::String& s) { setMidiStatus (s); };
+    globalsPanel.setFunctionBuffer (&plugin.functionBuffer);
+    globalsPanel.setMidi (&plugin.midi);
+    globalsPanel.setApplyWithVoiceLoad (plugin.prefs.applyGlobalsWithVoiceLoad);
+    globalsPanel.onStatus = [this] (const juce::String& s) { setMidiStatus (s); };
+    globalsPanel.onHeightChanged = [this] (int h)
+    {
+        const int maxH = juce::jmax (fmlib::GlobalsPanel::kMinHeight, getHeight() - 200);
+        plugin.prefs.globalsPanelHeight = juce::jlimit (fmlib::GlobalsPanel::kMinHeight,
+                                                        juce::jmin (fmlib::GlobalsPanel::kMaxHeight, maxH),
+                                                        h);
+        resized();
+    };
+    globalsPanel.onHeightChangeEnded = [this] { plugin.persistPreferences(); };
+    globalsPanel.onApplyWithVoiceLoadChanged = [this] (bool on)
+    {
+        plugin.prefs.applyGlobalsWithVoiceLoad = on;
+        plugin.persistPreferences();
+    };
+    globalsPanel.onRequestGet = [this] { plugin.requestFunctionDump(); };
+    globalsPanel.onRequestApplyAttenuator = [this]
+    {
+        if (plugin.sendFunctionBuffer())
+            setMidiStatus ("Applied TX7 performance bulk (attenuator)");
+        else
+            setMidiStatus ("Get Fn from the TX7 before Apply (avoids wiping function memory)");
+    };
+    globalsPanel.onProtectOff = [this]
+    {
+        plugin.sendMemoryProtectOff();
+        txSystem.setMemoryProtectUi (false);
+        setMidiStatus ("TX7 Memory Protect Off sent");
+    };
+    plugin.setFunctionBufferChangedCallback ([safe = juce::Component::SafePointer<FmLibPlugAudioProcessorEditor> (this)]
+    {
+        if (safe != nullptr)
+            safe->globalsPanel.refreshFromBuffer();
+    });
+    txSystem.setMidi (&plugin.midi);
+    txSystem.onStatus = [this] (const juce::String& s) { setMidiStatus (s); };
     morpher.setPresetStore (&plugin.morphPresets);
     morpher.setDefaultLockGroups (plugin.prefs.morphLockGroups);
     morpher.setLockGroups (plugin.prefs.morphLockGroups);
@@ -174,6 +218,13 @@ FmLibPlugAudioProcessorEditor::FmLibPlugAudioProcessorEditor (FmLibPlugAudioProc
             showLibraryMode(); // Morph <-> Device buffer
         else
             showMorphMode();
+    };
+    globalsBtn.onClick = [this]
+    {
+        if (globalsBtn.getToggleState())
+            showGlobalsMode();
+        else
+            showLibraryMode();
     };
     auditionBtn.setTooltip ("Hold to play the audition note (release to stop). Keyboard: hold A.");
     auditionBtn.setClickingTogglesState (false);
@@ -395,6 +446,12 @@ FmLibPlugAudioProcessorEditor::FmLibPlugAudioProcessorEditor (FmLibPlugAudioProc
             setMidiStatus ("All tags cleared");
         }));
     };
+    settings.onDefaultsReset = [this]
+    {
+        plugin.prefs.applyGlobalsWithVoiceLoad = false;
+        globalsPanel.setApplyWithVoiceLoad (false);
+        plugin.persistPreferences();
+    };
 
     settings.setLibraryFolders (plugin.prefs.libraryFolders);
     settings.setMidiLists (plugin.midi.getInputNames (plugin.showDawMidiPorts()),
@@ -431,11 +488,16 @@ FmLibPlugAudioProcessorEditor::FmLibPlugAudioProcessorEditor (FmLibPlugAudioProc
         showSettingsMode();
     else if (plugin.lastEditorPage == 2)
         showMorphMode();
+    else if (plugin.lastEditorPage == 3)
+        showGlobalsMode();
 }
 
 FmLibPlugAudioProcessorEditor::~FmLibPlugAudioProcessorEditor()
 {
-    plugin.lastEditorPage = uiMode == UiMode::settings ? 1 : (uiMode == UiMode::morph ? 2 : 0);
+    plugin.lastEditorPage = uiMode == UiMode::settings ? 1
+                          : uiMode == UiMode::morph    ? 2
+                          : uiMode == UiMode::globals  ? 3
+                                                       : 0;
     plugin.lastMorpherPresetsPage = morpher.getMode() == fmlib::MorpherPanel::Mode::presets ? 1 : 0;
     browser.getTable().removeKeyListener (this);
     devicePanel.getList().removeKeyListener (this);
@@ -444,6 +506,7 @@ FmLibPlugAudioProcessorEditor::~FmLibPlugAudioProcessorEditor()
     plugin.library.clearListeners();
     plugin.midi.setStatusCallback (nullptr);
     plugin.setMorphUiSyncCallback (nullptr);
+    plugin.setFunctionBufferChangedCallback (nullptr);
     setLookAndFeel (nullptr);
 }
 
@@ -565,7 +628,10 @@ void FmLibPlugAudioProcessorEditor::handleLibraryVoiceLoad (const fmlib::PatchEn
     if (loadBank && e.bankSlot > 0)
     {
         if (auto bank = plugin.library.getBankVoices (e.absolutePath))
+        {
             plugin.midi.sendBank (*bank);
+            plugin.sendGlobalsWithVoiceLoadIfEnabled();
+        }
         else
             plugin.sendVoice (e.voice);
     }
@@ -739,6 +805,7 @@ void FmLibPlugAudioProcessorEditor::updateModeButtons()
 {
     settingsBtn.setToggleState (uiMode == UiMode::settings, juce::dontSendNotification);
     morphBtn.setToggleState (uiMode == UiMode::morph, juce::dontSendNotification);
+    globalsBtn.setToggleState (uiMode == UiMode::globals, juce::dontSendNotification);
     morphBtn.setButtonText ("Morph");
 }
 
@@ -747,8 +814,10 @@ void FmLibPlugAudioProcessorEditor::showLibraryMode()
     uiMode = UiMode::library;
     settings.setVisible (false);
     morpher.setVisible (false);
+    txSystem.setVisible (false);
     browser.setVisible (true);
     devicePanel.setVisible (true);
+    globalsPanel.setVisible (true);
     updateModeButtons();
     resized();
 }
@@ -758,8 +827,10 @@ void FmLibPlugAudioProcessorEditor::showSettingsMode()
     uiMode = UiMode::settings;
     settings.setVisible (true);
     morpher.setVisible (false);
+    txSystem.setVisible (false);
     browser.setVisible (false);
     devicePanel.setVisible (false);
+    globalsPanel.setVisible (false);
     settings.applyThemeColours (plugin.prefs.darkTheme);
     updateModeButtons();
     resized();
@@ -770,10 +841,25 @@ void FmLibPlugAudioProcessorEditor::showMorphMode()
     uiMode = UiMode::morph;
     settings.setVisible (false);
     morpher.setVisible (true);
+    txSystem.setVisible (false);
     browser.setVisible (true);
     devicePanel.setVisible (false);
+    globalsPanel.setVisible (false);
     morpher.setMode (plugin.lastMorpherPresetsPage != 0 ? fmlib::MorpherPanel::Mode::presets
                                                        : fmlib::MorpherPanel::Mode::morph);
+    updateModeButtons();
+    resized();
+}
+
+void FmLibPlugAudioProcessorEditor::showGlobalsMode()
+{
+    uiMode = UiMode::globals;
+    settings.setVisible (false);
+    morpher.setVisible (false);
+    txSystem.setVisible (true);
+    browser.setVisible (false);
+    devicePanel.setVisible (false);
+    globalsPanel.setVisible (false);
     updateModeButtons();
     resized();
 }
@@ -833,6 +919,7 @@ void FmLibPlugAudioProcessorEditor::resized()
     subtitle.setBounds (header.removeFromLeft (260));
     versionLabel.setBounds (header.removeFromLeft (160));
     settingsBtn.setBounds (header.removeFromRight (90).reduced (2));
+    globalsBtn.setBounds (header.removeFromRight (80).reduced (2));
     morphBtn.setBounds (header.removeFromRight (80).reduced (2));
     auditionBtn.setBounds (header.removeFromRight (80).reduced (2));
     status.setBounds (r.removeFromTop (22));
@@ -840,6 +927,10 @@ void FmLibPlugAudioProcessorEditor::resized()
     if (uiMode == UiMode::settings)
     {
         settings.setBounds (r);
+    }
+    else if (uiMode == UiMode::globals)
+    {
+        txSystem.setBounds (r);
     }
     else if (uiMode == UiMode::morph)
     {
@@ -851,6 +942,13 @@ void FmLibPlugAudioProcessorEditor::resized()
     else
     {
         auto right = r.removeFromRight (320);
+        const int maxH = juce::jmax (fmlib::GlobalsPanel::kMinHeight, right.getHeight() - 120);
+        const int globalsH = juce::jlimit (fmlib::GlobalsPanel::kMinHeight,
+                                           juce::jmin (fmlib::GlobalsPanel::kMaxHeight, maxH),
+                                           plugin.prefs.globalsPanelHeight);
+        plugin.prefs.globalsPanelHeight = globalsH;
+        globalsPanel.setBounds (right.removeFromBottom (globalsH));
+        right.removeFromBottom (6);
         devicePanel.setBounds (right);
         r.removeFromRight (8);
         browser.setBounds (r);
@@ -913,7 +1011,10 @@ void FmLibPlugAudioProcessorEditor::sendDeviceBuffer()
         if (auto bank = plugin.deviceBuffer.asBank())
         {
             if (plugin.midi.sendBank (*bank))
+            {
                 setMidiStatus ("Sent device buffer (32 voices)");
+                plugin.sendGlobalsWithVoiceLoadIfEnabled();
+            }
         }
         return;
     }

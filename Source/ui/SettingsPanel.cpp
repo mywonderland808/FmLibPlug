@@ -60,8 +60,24 @@ SettingsPanel::SettingsPanel()
     addAndMakeVisible (midiControllerThru);
     addAndMakeVisible (checklist);
 
+    // Short scannable bullets (ASCII only). Morph timing detail lives on control tooltips.
+    checklist.setMultiLine (true, true);
+    checklist.setReadOnly (true);
+    checklist.setScrollbarsShown (false);
+    checklist.setCaretVisible (false);
+    checklist.setPopupMenuEnabled (false);
     checklist.setFont (juce::FontOptions (12.0f));
-    checklist.setJustificationType (juce::Justification::topLeft);
+    checklist.setText (
+        "Hardware checklist\n"
+        "- Memory Protect OFF before bank write (TX7 Globals Protect Off, or TX System)\n"
+        "- MIDI channel matches the synth\n"
+        "- Computer OUT -> synth IN; synth OUT -> Computer IN (device input)\n"
+        "- Optional controller keyboard -> MIDI controller in (TX7 keys stay local)\n"
+        "- Enable Forward controller MIDI to send controller/(DAW) notes to the synth\n"
+        "- Prefer a proper MIDI interface for SysEx\n"
+        "- Reset defaults restores morph, audition, UI, pacing, thru (not ports/tags/folders)",
+        false);
+    checklist.setInterceptsMouseClicks (false, false);
 
     auto setupSlider = [] (juce::Slider& s, double min, double max, double step, const juce::String& suffix)
     {
@@ -239,6 +255,8 @@ void SettingsPanel::resetNonMidiDefaults()
         onBrowserPrefsChanged();
     if (onTooltipsChanged)
         onTooltipsChanged();
+    if (onDefaultsReset)
+        onDefaultsReset();
 }
 
 void SettingsPanel::lookAndFeelChanged()
@@ -251,7 +269,11 @@ void SettingsPanel::applyThemeColours (bool darkTheme)
 {
     const auto p = ThemePalette::forTheme (darkTheme);
 
-    checklist.setColour (juce::Label::textColourId, p.text);
+    checklist.setColour (juce::TextEditor::textColourId, p.text);
+    checklist.setColour (juce::TextEditor::backgroundColourId, juce::Colours::transparentBlack);
+    checklist.setColour (juce::TextEditor::outlineColourId, juce::Colours::transparentBlack);
+    checklist.setColour (juce::TextEditor::focusedOutlineColourId, juce::Colours::transparentBlack);
+    checklist.setColour (juce::TextEditor::highlightColourId, p.accent.withAlpha (0.25f));
     foldersLabel.setColour (juce::Label::textColourId, p.text);
     for (auto* l : { &midiInLabel, &midiControllerLabel, &midiOutLabel, &channelLabel, &pacingLabel, &morphEmitLabel,
                      &morphReleaseLabel, &noteSettleLabel, &morphStreamLabel, &noteLabel, &velLabel, &durLabel })

@@ -938,7 +938,7 @@ void MorpherPanel::commitLockRef()
         if (onStatus)
             onStatus ("Lock reference @ " + juce::String (percent99 (lockRefX)) + "%, "
                       + juce::String (percent99 (lockRefY))
-                      + "% (morph paused — applies on resume)");
+                      + "% (morph paused - applies on resume)");
         return;
     }
     emitMorph (false, true);
