@@ -7,39 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-- Edge LFO **Sync** to DAW tempo with note divisions (1/1–1/32, triplets, dotted). Phase follows the playhead while the transport runs. Host parameters: **Edge LFO Sync**, **Edge LFO Div**. **CCW** (Sync on) or a negative Rate (Sync off) reverses the orbit.
-
-### Fixed
-- Host MIDI no longer passes through to the synth. `(DAW)` controller notes drive morph only; **Forward controller MIDI to output** is required to send them to MIDI out (Note morph Random/Edges still schedules its delayed note-on).
-- Forwarded controller MIDI to `(DAW)` output leaves in the same audio block.
-- Controller keys count as sounding for morph gating when Forward is off; note-offs always release plugin-originated notes (no stuck notes after leaving Random/Edges).
-- Edge LFO keeps running while the DAW transport is playing. Morph X/Y automation applies when Edge LFO is off (a running LFO owns the pad so the host timeline cannot freeze it).
-- Edge LFO tempo-sync uses the selected note as **one pad edge**; a full A-B-D-C orbit is four edges (1/4 ≈ one bar of 4/4).
-- Reopening the editor restores the last page (Library / Settings / Morph, including Morph Presets).
-- Morph preset list refreshes after layout; Edge LFO SysEx is paced to Morph emit like pad moves.
-- Turning Edge LFO or Note morph back on resumes morph after a Morph-page library click.
-- `(DAW)` MIDI out spaces SysEx packets instead of dumping them in one audio block.
-- `:singles` (also `singles:`) lists 1-voice SysEx rows, including several concatenated in one file and Dexed 128-byte `.syx`. Typing it in Bank view switches to All. `tag:single` is a normal user tag, not this filter.
-- Duplicate detection ignores unused MIDI bits on packed params as well as the voice name.
-
-### Changed
-- Library toolbar is **Bank** vs **All** only. 1-voice SysEx (format 0x00 / Dexed 128-byte) is filtered with **`:singles`**, not a reserved tag. The Settings List-button combo is gone.
-- Duplicate detection hashes canonical packed voice parameters (ignores unused VCED bits and the 10-character name), so the same sound in another bank/slot is a dupe. Existing favorites/tags keyed to the old hash need a re-star / re-tag.
-- Library scan reads files in one pass and skips `.git`; list rebuild sorts by index and caches name keys so large libraries stay responsive.
-- Edge LFO Sync shows a **CCW** toggle instead of signed note values (`-1/4`, …). Direction is still the sign of **Edge LFO Rate**.
-
-## [1.3.0] - 2026-08-18
+## [1.3.0] - 2026-08-20
 
 ### Added
-- Host-automatable morph parameters: **Morph X/Y**, **Lock Ref X/Y**, **Edge LFO Rate**, and **Morph Motion** (Off / Random / Edges / Edge LFO)
+- Host-automatable morph parameters: **Morph X/Y**, **Lock Ref X/Y**, **Edge LFO Rate**, **Edge LFO Sync**, **Edge LFO Div**, and **Morph Motion** (Off / Random / Edges / Edge LFO)
+- Edge LFO **Sync** to DAW tempo with note divisions (1/1–1/32, triplets, dotted). Phase follows the playhead while the transport runs. **CCW** (Sync on) or a negative Rate (Sync off) reverses the orbit
 - DAW project session restore of the live morph set (corners, locks, pad, lock-ref) via host state
 - Settings MIDI port **`(DAW)`** on device in, controller in, and output (plugin formats; routes through the host MIDI bus)
+- `:singles` (also `singles:`) lists 1-voice SysEx rows, including several concatenated in one file and Dexed 128-byte `.syx`. Typing it in Bank view switches to All. `tag:single` is a normal user tag, not this filter
 
 ### Changed
 - Processor owns the live morph snapshot; morph and SysEx continue with the UI closed when the host automates X/Y or motion
-- Morpher panel is a view over processor/APVTS state; pad and motion controls write host parameters
+- Morpher panel is a pure view over processor/APVTS state (no local LFO/note-jump timer); pad and motion controls write host parameters
 - Note morph and controller MIDI handling live on the processor (works without an open editor)
+- Library toolbar is **Bank** vs **All** only. 1-voice SysEx (format 0x00 / Dexed 128-byte) is filtered with **`:singles`**, not a reserved tag. The Settings List-button combo is gone
+- Duplicate detection hashes canonical packed voice parameters (ignores unused VCED bits and the 10-character name), so the same sound in another bank/slot is a dupe. Existing favorites/tags keyed to the old hash need a re-star / re-tag
+- Library scan reads files in one pass and skips `.git`; list rebuild sorts by index and caches name keys so large libraries stay responsive
+- Browser rows keep `PatchMeta` only and resolve voice payloads lazily; bank load uses a path index instead of copying the whole library
+- Tag display strings are cached for sort/paint; hardware controller thru uses a lock-free POD ring flushed on the message thread
+- Edge LFO Sync shows a **CCW** toggle instead of signed note values (`-1/4`, …). Direction is still the sign of **Edge LFO Rate**
+
+### Fixed
+- Host MIDI no longer passes through to the synth. `(DAW)` controller notes drive morph only; **Forward controller MIDI to output** is required to send them to MIDI out (Note morph Random/Edges still schedules its delayed note-on)
+- Forwarded controller MIDI to `(DAW)` output leaves in the same audio block
+- Controller keys count as sounding for morph gating when Forward is off; note-offs always release plugin-originated notes (no stuck notes after leaving Random/Edges)
+- Edge LFO keeps running while the DAW transport is playing. Morph X/Y automation applies when Edge LFO is off (a running LFO owns the pad so the host timeline cannot freeze it)
+- Edge LFO tempo-sync uses the selected note as **one pad edge**; a full A-B-D-C orbit is four edges (1/4 ≈ one bar of 4/4)
+- Reopening the editor restores the last page (Library / Settings / Morph, including Morph Presets)
+- Morph preset list refreshes after layout; Edge LFO SysEx is paced to Morph emit like pad moves
+- Turning Edge LFO or Note morph back on resumes morph after a Morph-page library click
+- `(DAW)` MIDI out spaces SysEx packets instead of dumping them in one audio block
+- Duplicate detection ignores unused MIDI bits on packed params as well as the voice name
+- Concatenated 1-voice rows that share a file path resolve by library index (not the first path match)
+- Hardware thru flush re-arms when events arrive while a drain is already queued
+- Morph pad click ends the gesture begun on mouse-down (begin/end pairing)
 
 ## [1.2.1] - 2026-08-17
 
