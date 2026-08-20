@@ -31,7 +31,7 @@ std::vector<BrowserRow> BrowserList::buildRows (std::vector<PatchEntry> voices, 
             BrowserRow r;
             r.kind = BrowserRowKind::voice;
             r.bankPath = e.absolutePath;
-            r.entry = std::move (e);
+            r.meta = std::move (static_cast<PatchMeta&> (e));
             rows.push_back (std::move (r));
         }
         return rows;
@@ -59,7 +59,7 @@ std::vector<BrowserRow> BrowserList::buildRows (std::vector<PatchEntry> voices, 
             BrowserRow r;
             r.kind = BrowserRowKind::voice;
             r.bankPath = path;
-            r.entry = std::move (voices[k]);
+            r.meta = std::move (static_cast<PatchMeta&> (voices[k]));
             rows.push_back (std::move (r));
         }
         i = j;
@@ -288,17 +288,17 @@ std::optional<int> BrowserList::prevNameGroupRow (const std::vector<BrowserRow>&
             return std::nullopt;
     }
 
-    const char key = nameGroupKey (rows[static_cast<size_t> (cur)].entry.voiceName);
+    const char key = nameGroupKey (rows[static_cast<size_t> (cur)].meta.voiceName);
     for (int i = cur - 1; i >= 0; --i)
     {
         if (rows[static_cast<size_t> (i)].kind != BrowserRowKind::voice)
             continue;
-        if (nameGroupKey (rows[static_cast<size_t> (i)].entry.voiceName) == key)
+        if (nameGroupKey (rows[static_cast<size_t> (i)].meta.voiceName) == key)
             continue;
-        const char target = nameGroupKey (rows[static_cast<size_t> (i)].entry.voiceName);
+        const char target = nameGroupKey (rows[static_cast<size_t> (i)].meta.voiceName);
         int start = i;
         while (start > 0 && rows[static_cast<size_t> (start - 1)].kind == BrowserRowKind::voice
-               && nameGroupKey (rows[static_cast<size_t> (start - 1)].entry.voiceName) == target)
+               && nameGroupKey (rows[static_cast<size_t> (start - 1)].meta.voiceName) == target)
             --start;
         return start;
     }
@@ -321,12 +321,12 @@ std::optional<int> BrowserList::nextNameGroupRow (const std::vector<BrowserRow>&
             return std::nullopt;
     }
 
-    const char key = nameGroupKey (rows[static_cast<size_t> (cur)].entry.voiceName);
+    const char key = nameGroupKey (rows[static_cast<size_t> (cur)].meta.voiceName);
     for (int i = cur + 1; i < static_cast<int> (rows.size()); ++i)
     {
         if (rows[static_cast<size_t> (i)].kind != BrowserRowKind::voice)
             continue;
-        if (nameGroupKey (rows[static_cast<size_t> (i)].entry.voiceName) != key)
+        if (nameGroupKey (rows[static_cast<size_t> (i)].meta.voiceName) != key)
             return i;
     }
     return std::nullopt;

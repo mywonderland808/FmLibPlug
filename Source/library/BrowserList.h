@@ -22,8 +22,8 @@ enum class BrowserRowKind
 struct BrowserRow
 {
     BrowserRowKind kind = BrowserRowKind::voice;
-    /** Full voice data for voice rows; empty for section headers. */
-    PatchEntry entry;
+    /** Index metadata for voice rows (no VoiceData); empty for section headers. */
+    PatchMeta meta;
     /** Bank file path for navigation (set on headers and voice rows). */
     std::filesystem::path bankPath;
     std::string sectionLabel;
@@ -56,7 +56,7 @@ class BrowserList
 {
 public:
     static std::vector<PatchEntry> sortGrouped (std::vector<PatchEntry> entries);
-    /** Moves voices into row entries (headers store path/label only). */
+    /** Copies PatchMeta into voice rows (headers store path/label only; no VoiceData). */
     static std::vector<BrowserRow> buildRows (std::vector<PatchEntry> voices, bool groupByBank);
 
     /**
@@ -71,7 +71,7 @@ public:
                                                  const TagStore* tags = nullptr,
                                                  const std::unordered_set<uint64_t>* recentIds = nullptr);
 
-    static bool isBankFileVoice (const PatchEntry& e) { return fmlib::isBankFileVoice (e); }
+    static bool isBankFileVoice (const PatchMeta& e) { return fmlib::isBankFileVoice (e); }
     static int countVoiceRows (const std::vector<BrowserRow>& rows);
 
     /** Index into `rows` of the first voice of the previous/next bank. nullopt at ends. */

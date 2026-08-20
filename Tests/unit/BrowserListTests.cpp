@@ -40,7 +40,7 @@ TEST_CASE ("BrowserList buildRows inserts section headers", "[library][browser]"
     const auto rows = BrowserList::buildRows (std::move (voices), true);
     REQUIRE (rows.size() == 5);
     REQUIRE (rows[0].kind == BrowserRowKind::sectionHeader);
-    REQUIRE (rows[0].entry.voiceName.empty());
+    REQUIRE (rows[0].meta.voiceName.empty());
     REQUIRE (rows[0].bankPath == "/a/a.syx");
     REQUIRE (rows[1].kind == BrowserRowKind::voice);
     REQUIRE (rows[3].kind == BrowserRowKind::sectionHeader);
@@ -71,10 +71,10 @@ TEST_CASE ("BrowserList prev next bank jumps", "[library][browser]")
     REQUIRE_FALSE (BrowserList::prevBankRow (rows, 1).has_value());
     const auto next = BrowserList::nextBankRow (rows, 1);
     REQUIRE (next.has_value());
-    REQUIRE (rows[static_cast<size_t> (*next)].entry.voiceName == "B1");
+    REQUIRE (rows[static_cast<size_t> (*next)].meta.voiceName == "B1");
     const auto prev = BrowserList::prevBankRow (rows, *next);
     REQUIRE (prev.has_value());
-    REQUIRE (rows[static_cast<size_t> (*prev)].entry.voiceName == "A1");
+    REQUIRE (rows[static_cast<size_t> (*prev)].meta.voiceName == "A1");
     REQUIRE_FALSE (BrowserList::nextBankRow (rows, static_cast<int> (rows.size()) - 1).has_value());
 }
 
@@ -85,7 +85,7 @@ TEST_CASE ("BrowserList prev next name group jumps", "[library][browser]")
     {
         BrowserRow r;
         r.kind = BrowserRowKind::voice;
-        r.entry.voiceName = name;
+        r.meta.voiceName = name;
         rows.push_back (std::move (r));
     };
     add ("Alpha");
@@ -129,7 +129,7 @@ TEST_CASE ("BrowserList name groups ignore leading junk and case", "[library][br
     {
         BrowserRow r;
         r.kind = BrowserRowKind::voice;
-        r.entry.voiceName = name;
+        r.meta.voiceName = name;
         rows.push_back (std::move (r));
     };
     // Same order Patch-name sort would produce after nameBrowseKey.
@@ -138,8 +138,8 @@ TEST_CASE ("BrowserList name groups ignore leading junk and case", "[library][br
     add ("Bravo");
     add ("brass");
 
-    REQUIRE (BrowserList::nameGroupKey (rows[0].entry.voiceName) == 'A');
-    REQUIRE (BrowserList::nameGroupKey (rows[1].entry.voiceName) == 'A');
+    REQUIRE (BrowserList::nameGroupKey (rows[0].meta.voiceName) == 'A');
+    REQUIRE (BrowserList::nameGroupKey (rows[1].meta.voiceName) == 'A');
     REQUIRE (BrowserList::nameBrowseKey ("*Alpha") < BrowserList::nameBrowseKey (" amber"));
 
     const auto nextB = BrowserList::nextNameGroupRow (rows, 0);
@@ -156,7 +156,7 @@ TEST_CASE ("BrowserList non-letter names share one A-Z jump group", "[library][b
     {
         BrowserRow r;
         r.kind = BrowserRowKind::voice;
-        r.entry.voiceName = name;
+        r.meta.voiceName = name;
         rows.push_back (std::move (r));
     };
     add ("***");

@@ -5,7 +5,7 @@
 namespace fmlib
 {
 
-void PatchEntry::refreshSearchCache()
+void PatchMeta::refreshSearchCache()
 {
     voiceNameLower = asciiLower (voiceName);
     fileNameLower = asciiLower (fileName);
