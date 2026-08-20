@@ -1,7 +1,7 @@
 # FmLibPlug
 cmake_minimum_required(VERSION 3.22)
 
-project(FmLibPlug VERSION 1.3.0)
+project(FmLibPlug VERSION 1.3.5)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -80,6 +80,7 @@ target_sources(FmLibPlug
     Source/sysex/SysexParser.cpp
     Source/sysex/SysexMessages.cpp
     Source/sysex/FormatDetect.cpp
+    Source/sysex/Tx7Function.cpp
     Source/sysex/VoiceMorpher.cpp
     Source/sysex/MorphLocks.cpp
     Source/midi/MidiDeviceManager.cpp
@@ -172,6 +173,7 @@ if(FMLIBPLUG_BUILD_TESTS)
     Tools/GenTestFixtures.cpp
     Source/sysex/Dx7Formats.cpp
     Source/sysex/SysexMessages.cpp
+    Source/sysex/Tx7Function.cpp
   )
   target_include_directories(FmLibPlugGenFixtures PRIVATE Source)
   target_compile_features(FmLibPlugGenFixtures PRIVATE cxx_std_17)
@@ -212,6 +214,7 @@ if(FMLIBPLUG_BUILD_TESTS)
     Tests/unit/BrowserStatsTests.cpp
     Tests/unit/TagStoreTests.cpp
     Tests/unit/FormatDetectTests.cpp
+    Tests/unit/Tx7FunctionTests.cpp
     Tests/unit/AutoTagDupeTests.cpp
     Tests/unit/RecentFilterTests.cpp
     Tests/unit/VoiceMorpherTests.cpp
@@ -225,6 +228,7 @@ if(FMLIBPLUG_BUILD_TESTS)
     Source/sysex/SysexParser.cpp
     Source/sysex/SysexMessages.cpp
     Source/sysex/FormatDetect.cpp
+    Source/sysex/Tx7Function.cpp
     Source/sysex/VoiceMorpher.cpp
     Source/sysex/MorphLocks.cpp
     Source/midi/MorphTransport.cpp
@@ -274,6 +278,7 @@ if(FMLIBPLUG_BUILD_TESTS)
     Source/sysex/Dx7Formats.cpp
     Source/sysex/SysexParser.cpp
     Source/sysex/SysexMessages.cpp
+    Source/sysex/Tx7Function.cpp
   )
   target_include_directories(FmLibPlugSysexSmoke PRIVATE Source)
   target_compile_features(FmLibPlugSysexSmoke PRIVATE cxx_std_17)
@@ -294,6 +299,7 @@ if(FMLIBPLUG_BUILD_TESTS)
     Source/sysex/Dx7Formats.cpp
     Source/sysex/SysexParser.cpp
     Source/sysex/SysexMessages.cpp
+    Source/sysex/Tx7Function.cpp
   )
   target_include_directories(FmLibPlugHwMidiTest PRIVATE Source)
   target_compile_features(FmLibPlugHwMidiTest PRIVATE cxx_std_17)

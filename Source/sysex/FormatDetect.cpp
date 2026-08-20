@@ -1,4 +1,5 @@
 #include "sysex/FormatDetect.h"
+#include "sysex/Tx7Function.h"
 #include "util/StringUtils.h"
 #include <fstream>
 
@@ -63,11 +64,18 @@ FormatDetectResult FormatDetect::detect (const uint8_t* data, size_t size)
             r.supported = false;
             return r;
         }
-        // Function / performance style dumps often use format 0x01.. with different lengths
-        if (format == 0x01 || format == 0x02)
+        if (format == kFormatPerformance)
         {
             r.kind = SysexFormatKind::functionDump;
-            r.label = "TX7 function/performance-like";
+            r.label = "TX7 1-performance / function";
+            // Not a voice library format — FunctionBuffer parses via Tx7Performance.
+            r.supported = false;
+            return r;
+        }
+        if (format == kFormatPerformanceBank)
+        {
+            r.kind = SysexFormatKind::functionDump;
+            r.label = "TX7 64-performance bank (unsupported)";
             r.supported = false;
             return r;
         }
