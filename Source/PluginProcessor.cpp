@@ -889,6 +889,35 @@ void FmLibPlugAudioProcessor::sendVoice (const fmlib::VoiceData& voice)
     midi.sendVoice (voice);
     lastEditBufferVoice = voice;
     recent.push (id);
+    sendGlobalsWithVoiceLoadIfEnabled();
+}
+
+void FmLibPlugAudioProcessor::sendGlobalsWithVoiceLoadIfEnabled()
+{
+    // Dirty-only: avoid re-writing an unchanged Get/Send snapshot on every voice load.
+    if (! prefs.applyGlobalsWithVoiceLoad || ! functionBuffer.shouldApplyWithVoiceLoad())
+        return;
+    sendFunctionBuffer();
+}
+
+bool FmLibPlugAudioProcessor::sendFunctionBuffer()
+{
+    if (! functionBuffer.canBulkSend())
+        return false;
+    const auto ok = midi.sendPerformanceBulk (functionBuffer.getData());
+    if (ok)
+        functionBuffer.markSaved();
+    return ok;
+}
+
+bool FmLibPlugAudioProcessor::requestFunctionDump()
+{
+    return midi.requestFunctionDump();
+}
+
+void FmLibPlugAudioProcessor::sendMemoryProtectOff()
+{
+    midi.sendTxFunctionParam (fmlib::TxFunctionParam::memoryProtect, 0);
 }
 
 void FmLibPlugAudioProcessor::rememberEditBufferVoice (const fmlib::VoiceData& voice)
@@ -1182,6 +1211,22 @@ void FmLibPlugAudioProcessor::autoTagLibrary (std::function<void()> onDone)
 
 void FmLibPlugAudioProcessor::handleIncomingSysex (const std::vector<uint8_t>& bytes)
 {
+    if (fmlib::Tx7Performance::looksLikePerformanceBulk (bytes.data(), bytes.size()))
+    {
+        if (auto perf = fmlib::Tx7Performance::parsePerformanceBulk (bytes))
+        {
+            functionBuffer.setFromDevice (std::move (*perf));
+            midi.reportStatus ("Received TX7 function / performance");
+            if (functionBufferChanged)
+                functionBufferChanged();
+        }
+        else
+        {
+            midi.reportStatus ("TX7 function dump rejected (bad checksum)");
+        }
+        return;
+    }
+
     const auto parsed = fmlib::SysexParser::parseBytes (bytes);
     if (parsed.voices.empty())
         return;

@@ -2,6 +2,7 @@
 
 #include "midi/MorphTransport.h"
 #include "sysex/Dx7Formats.h"
+#include "sysex/Tx7Function.h"
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <array>
 #include <atomic>
@@ -98,10 +99,16 @@ public:
     void invalidateMorphBaseline();
     bool sendBank (const std::array<VoiceData, kBankVoiceCount>& bank);
     bool requestDump (bool bank32);
+    bool requestFunctionDump();
+    bool sendPerformanceBulk (const Tx7PerformanceData& data, bool pace = true);
+    bool sendDxFunctionParam (DxFunctionParam param, uint8_t value);
+    bool sendTxFunctionParam (TxFunctionParam param, uint8_t value);
     bool sendNoteOn (int note, int velocity);
     bool sendNoteOff (int note);
 
     void setStatusCallback (StatusFn fn) { statusFn = std::move (fn); }
+    /** Message-thread-safe status for the editor (same path as MIDI open/send). */
+    void reportStatus (const juce::String& s) { setStatus (s); }
     void setSysexReceivedCallback (SysexFn fn) { sysexFn = std::move (fn); }
     void setControllerNoteOnCallback (NoteOnFn fn) { noteOnFn = std::move (fn); }
     void setControllerNoteOffCallback (NoteOnFn fn) { noteOffFn = std::move (fn); }

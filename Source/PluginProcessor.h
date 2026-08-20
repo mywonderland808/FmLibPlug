@@ -3,6 +3,7 @@
 #include "host/MorphHostState.h"
 #include "host/PluginSessionState.h"
 #include "library/DeviceBuffer.h"
+#include "library/FunctionBuffer.h"
 #include "library/FavoritesStore.h"
 #include "library/MorphPresetStore.h"
 #include "library/PatchLibrary.h"
@@ -54,6 +55,7 @@ public:
     fmlib::AppPreferences prefs;
     fmlib::PatchLibrary library;
     fmlib::DeviceBuffer deviceBuffer;
+    fmlib::FunctionBuffer functionBuffer;
     fmlib::FavoritesStore favorites;
     fmlib::TagStore tags;
     fmlib::RecentStore recent;
@@ -68,6 +70,13 @@ public:
     void persistAllUserData();
     void handleIncomingSysex (const std::vector<uint8_t>& bytes);
     void sendVoice (const fmlib::VoiceData& voice);
+    /** After a voice dump, send Fn if prefs.applyGlobalsWithVoiceLoad and buffer is dirty. */
+    void sendGlobalsWithVoiceLoadIfEnabled();
+    bool sendFunctionBuffer();
+    bool requestFunctionDump();
+    void sendMemoryProtectOff();
+    /** Notify UI that FunctionBuffer changed (Get or live edit). */
+    void setFunctionBufferChangedCallback (std::function<void()> fn) { functionBufferChanged = std::move (fn); }
     /** Update last edit-buffer snapshot without a SysEx send (morph stream). */
     void rememberEditBufferVoice (const fmlib::VoiceData& voice);
     /** Last voice sent to the edit buffer. */
@@ -144,7 +153,7 @@ public:
 
     bool showDawMidiPorts() const;
 
-    int lastEditorPage = 0; // 0 library, 1 settings, 2 morph
+    int lastEditorPage = 0; // 0 library, 1 settings, 2 morph, 3 TX System
     int lastMorpherPresetsPage = 0;
 
 private:
@@ -211,6 +220,7 @@ private:
     uint32_t morphLastLfoTimerMs = 0;
     std::set<int> controllerHeldNotes;
     std::function<void()> morphUiSync;
+    std::function<void()> functionBufferChanged;
 
     int lastAuditionNote = -1;
     int pendingNote = -1;

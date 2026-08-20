@@ -76,6 +76,10 @@ public:
     int morphStreamMode = static_cast<int> (MorphStreamMode::freqOnly);
     /** Forward controller MIDI (notes/CC) to MIDI out. Default off. */
     bool midiControllerThru = false;
+    /** After loading a voice, send Fn only if edited since last Get/Send. Default off. */
+    bool applyGlobalsWithVoiceLoad = false;
+    /** Height of the TX7 Globals panel under Device (pixels). */
+    int globalsPanelHeight = 280;
     bool darkTheme = true;
     /** Toolbar Bank vs All: true = grouped bank files (slot 1..32), false = flat list of every voice. */
     bool bankFileView = true;

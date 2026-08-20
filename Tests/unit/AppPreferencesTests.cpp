@@ -40,6 +40,8 @@ TEST_CASE ("AppPreferences saveToFile loadFromFile round-trip", "[prefs]")
         prefs.morphNoteJumpMode = 2;
         prefs.morphStreamMode = 0;
         prefs.midiControllerThru = true;
+        prefs.applyGlobalsWithVoiceLoad = true;
+        prefs.globalsPanelHeight = 320;
         prefs.libraryFolders = { { "/tmp/a", true }, { "/tmp/b", false } };
         prefs.favoriteIds.clear();
         prefs.favoriteIds.add ("99");
@@ -77,6 +79,8 @@ TEST_CASE ("AppPreferences saveToFile loadFromFile round-trip", "[prefs]")
     REQUIRE (loaded.morphNoteJumpMode == 2);
     REQUIRE (loaded.morphStreamMode == 0);
     REQUIRE (loaded.midiControllerThru);
+    REQUIRE (loaded.applyGlobalsWithVoiceLoad);
+    REQUIRE (loaded.globalsPanelHeight == 320);
     REQUIRE (loaded.libraryFolders.size() == 2);
     REQUIRE (loaded.libraryFolders[0].path == "/tmp/a");
     REQUIRE (loaded.libraryFolders[0].enabled);

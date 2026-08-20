@@ -744,6 +744,32 @@ bool MidiDeviceManager::requestDump (bool bank32)
     return ok;
 }
 
+bool MidiDeviceManager::requestFunctionDump()
+{
+    const auto ok = sendRaw (SysexMessages::makeDumpRequestFormat (kFormatPerformance, channel));
+    if (ok)
+        setStatus ("Requested TX7 function dump...");
+    return ok;
+}
+
+bool MidiDeviceManager::sendPerformanceBulk (const Tx7PerformanceData& data, bool pace)
+{
+    const auto ok = sendRaw (SysexMessages::makePerformanceBulk (data, channel), pace);
+    if (ok)
+        setStatus ("Sent TX7 function / performance");
+    return ok;
+}
+
+bool MidiDeviceManager::sendDxFunctionParam (DxFunctionParam param, uint8_t value)
+{
+    return sendRaw (SysexMessages::makeDxFunctionParamChange (param, value, channel), false);
+}
+
+bool MidiDeviceManager::sendTxFunctionParam (TxFunctionParam param, uint8_t value)
+{
+    return sendRaw (SysexMessages::makeTxFunctionParamChange (param, value, channel), false);
+}
+
 bool MidiDeviceManager::sendNoteOn (int note, int velocity)
 {
     if (! hasOutput())

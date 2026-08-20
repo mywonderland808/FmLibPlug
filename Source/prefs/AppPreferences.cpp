@@ -91,6 +91,8 @@ void AppPreferences::loadFromFile (const juce::File& f)
                                   : static_cast<int> (MorphStreamMode::freqOnly);
         }
         midiControllerThru = xml->getBoolAttribute ("midiControllerThru", false);
+        applyGlobalsWithVoiceLoad = xml->getBoolAttribute ("applyGlobalsWithVoiceLoad", false);
+        globalsPanelHeight = juce::jlimit (140, 560, xml->getIntAttribute ("globalsPanelHeight", 280));
         auditionNote = xml->getIntAttribute ("auditionNote", 60);
         auditionVelocity = xml->getIntAttribute ("auditionVelocity", 100);
         auditionDurationMs = xml->getIntAttribute ("auditionDurationMs", 250);
@@ -152,6 +154,8 @@ void AppPreferences::saveToFile (const juce::File& f) const
     xml->setAttribute ("morphNoteJumpMode", morphNoteJumpMode);
     xml->setAttribute ("morphStreamMode", morphStreamMode);
     xml->setAttribute ("midiControllerThru", midiControllerThru);
+    xml->setAttribute ("applyGlobalsWithVoiceLoad", applyGlobalsWithVoiceLoad);
+    xml->setAttribute ("globalsPanelHeight", globalsPanelHeight);
     xml->setAttribute ("auditionNote", auditionNote);
     xml->setAttribute ("auditionVelocity", auditionVelocity);
     xml->setAttribute ("auditionDurationMs", auditionDurationMs);
