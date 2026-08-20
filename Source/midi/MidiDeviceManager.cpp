@@ -382,6 +382,7 @@ void MidiDeviceManager::thruControllerMessageIfEnabled (const juce::MidiMessage&
 
     sendMessageNowLocked (message);
     {
+        // Track thru notes under lock; morph sounding is updated on the message thread.
         const juce::ScopedLock sl (thruLock);
         if (isNoteOn)
             thruHeldNotes.insert (note);
@@ -411,7 +412,7 @@ void MidiDeviceManager::handleControllerMessage (const juce::MidiMessage& messag
         juce::MessageManager::callAsync ([this, epoch, alive = alive]
         {
             if (! alive->load() || epoch != thruSyncEpoch.load())
-                return;
+                return; // destroyed, superseded or closed
             syncNotesSounding (notesSoundingFn ? notesSoundingFn() : false);
         });
     }
@@ -458,6 +459,7 @@ bool MidiDeviceManager::sendMessageNowLocked (const juce::MidiMessage& message)
     if (output == nullptr)
         return false;
     ensureBackgroundThread();
+    // Immediate path for single note events - still serialized with morph egress.
     output->sendMessageNow (message);
     return true;
 }

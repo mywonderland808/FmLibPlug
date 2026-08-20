@@ -204,6 +204,7 @@ FmLibPlugAudioProcessorEditor::FmLibPlugAudioProcessorEditor (FmLibPlugAudioProc
     morpher.onPresetsChanged = [this] { plugin.persistMorphPresets(); };
     morpher.onMorphUiPrefsChanged = [this]
     {
+        // Persist LFO / note-jump and lock *defaults* (Set default updates those).
         plugin.prefs.morphLockGroups = morpher.getDefaultLockGroups();
         plugin.prefs.morphLockRefX = morpher.getDefaultLockRefX();
         plugin.prefs.morphLockRefY = morpher.getDefaultLockRefY();

@@ -376,6 +376,8 @@ std::vector<std::string> PatchBrowser::tagsForDisplay (const PatchEntry& e) cons
 
 void PatchBrowser::refreshTagStrip()
 {
+    // Runs on the collapsed path too, where rebuildTagStripButtons never fires:
+    // without this the Show Tags toggle would stay hidden once tags exist.
     tagFilterHasCatalog = ! tagFilterCatalog().empty();
 
     updateTagFilterHeader();
@@ -648,6 +650,7 @@ int PatchBrowser::compareEntries (const PatchEntry& a, const PatchEntry& b) cons
 {
     auto nameOf = [] (const PatchEntry& e) -> const std::string&
     {
+        // Same buckets as A-Z jumps: letters A-Z, everything else one group.
         return e.nameSortKey;
     };
     auto fileOf = [] (const PatchEntry& e) -> const std::string&

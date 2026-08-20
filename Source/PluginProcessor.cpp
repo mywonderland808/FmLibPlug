@@ -38,7 +38,7 @@ FmLibPlugAudioProcessor::FmLibPlugAudioProcessor()
         juce::MessageManager::callAsync ([this, alive, bytes]
         {
             if (! alive->load())
-                return;
+                return; // Processor went away while the dump was queued.
             handleIncomingSysex (bytes);
         });
     });
@@ -248,6 +248,7 @@ void FmLibPlugAudioProcessor::applyPreferencesToEngine()
     midi.setMorphReleaseGuardMs (prefs.morphReleaseGuardMs);
     midi.setMorphStreamMode (static_cast<fmlib::MorphStreamMode> (
         juce::jlimit (0, 1, prefs.morphStreamMode)));
+    // ~one param-change per morphEmitMs slice at default budget; scale gently with emit ms.
     const int budget = juce::jlimit (14, 70, (prefs.morphEmitMs <= 50 ? 56 : (prefs.morphEmitMs >= 200 ? 28 : 42)));
     midi.setMorphByteBudget (budget);
     midi.setNotesSoundingQuery ([this] { return hasSoundingNotes(); });
@@ -688,6 +689,8 @@ void FmLibPlugAudioProcessor::applyLiveMorph (bool dragEmit, bool liveAllParams)
     const auto voice = fmlib::VoiceMorpher::morph4 (liveMorph.a, liveMorph.b, liveMorph.c, liveMorph.d,
                                                     morphLastAppliedX, morphLastAppliedY, liveMorph.lockGroups,
                                                     liveMorph.lockRefX, liveMorph.lockRefY);
+    // Drag/LFO: stream under budget. Click / drag-end / jump: commit (full dump when idle).
+    // Lock-ref: liveAllParams so EG/level locks update a held note in Frequency-only mode.
     if (liveAllParams)
         midi.cancelMorphReleaseGuard();
     midi.sendMorphVoice (voice, ! dragEmit, liveAllParams);
@@ -716,6 +719,7 @@ void FmLibPlugAudioProcessor::advanceMorphLfo (double deltaSeconds)
         morphLfoPhase += (float) (deltaSeconds * (double) rate);
     }
     const float wrapped = morphLfoPhase - std::floor (morphLfoPhase);
+    // Quantize to discrete perimeter steps so MIDI only updates on musical ticks.
     const int step = juce::jlimit (0, fmlib::kMorphLfoStepsPerLoop - 1,
                                    (int) std::floor (wrapped * (float) fmlib::kMorphLfoStepsPerLoop));
     if (step == morphLastLfoStep)
@@ -724,6 +728,7 @@ void FmLibPlugAudioProcessor::advanceMorphLfo (double deltaSeconds)
 
     const float qPhase = ((float) step + 0.5f) / (float) fmlib::kMorphLfoStepsPerLoop;
     float x = 0.0f, y = 0.0f;
+    // Direction comes from signed lfoPhase only — do not also mirror in edgePosition.
     fmlib::morphPadEdgePosition (qPhase, true, x, y);
     publishMorphMotionPosition (x, y, true);
 }
@@ -786,10 +791,13 @@ void FmLibPlugAudioProcessor::handleControllerNoteOn (int note, int velocity)
     {
         if (firstOfPhrase)
         {
+            // The incoming note masks any release tail, so don't hold the dump.
             morphEgressPaused = false;
             midi.cancelMorphReleaseGuard();
             applyNoteJump();
         }
+        // Morph before the note so the new voice is on the wire when it sounds.
+        // Chord tones during lead-in join the same delayed batch.
         playControllerNoteAfterDelay (note, velocity, morphNoteLeadMs());
     }
     else
@@ -803,6 +811,7 @@ void FmLibPlugAudioProcessor::handleControllerNoteOff (int note)
     controllerHeldNotes.erase (note);
     releaseControllerNote (note);
     midi.syncNotesSounding (hasSoundingNotes());
+    // Next jump happens on the next note-on, with its own SysEx lead-in.
 }
 
 void FmLibPlugAudioProcessor::parameterChanged (const juce::String& parameterID, float newValue)
@@ -950,6 +959,7 @@ void FmLibPlugAudioProcessor::playHeldNoteAfterDelay (int note, int velocity, in
         return;
     }
 
+    // Pending delayed audition is not sounding yet - leave morph idle for the lead-in dump.
     midi.syncNotesSounding (hasSoundingNotes());
     auditionOn.startTimer (juce::jmax (1, delayMs));
 }
@@ -958,6 +968,7 @@ void FmLibPlugAudioProcessor::playControllerNote (int note, int velocity)
 {
     const int n = juce::jlimit (0, 127, note);
     const int v = juce::jlimit (1, 127, velocity);
+    // If this note was queued for lead-in, drop it from the pending batch.
     if (pendingControllerNote == n)
     {
         controllerNoteDelay.stopTimer();
@@ -988,6 +999,7 @@ void FmLibPlugAudioProcessor::playControllerNoteAfterDelay (int note, int veloci
         return;
     }
 
+    // Join an in-flight lead-in so chord tones share the same delayed attack.
     if (controllerNoteDelay.isTimerRunning())
     {
         for (auto& p : pendingControllerChord)
@@ -1008,6 +1020,7 @@ void FmLibPlugAudioProcessor::playControllerNoteAfterDelay (int note, int veloci
     pendingControllerNote = n;
     pendingControllerVelocity = v;
     pendingControllerChord.clear();
+    // Do not mark sounding yet - morph SysEx must land while idle.
     controllerNoteDelay.startTimer (juce::jmax (1, delayMs));
     midi.syncNotesSounding (hasSoundingNotes());
 }
@@ -1017,6 +1030,7 @@ void FmLibPlugAudioProcessor::releaseControllerNote (int note)
     const int n = juce::jlimit (0, 127, note);
     if (pendingControllerNote == n)
     {
+        // Promote next queued chord tone, or cancel the lead-in.
         if (! pendingControllerChord.empty())
         {
             pendingControllerNote = pendingControllerChord.front().first;
@@ -1064,6 +1078,9 @@ bool FmLibPlugAudioProcessor::hasPendingControllerLeadIn() const
 
 bool FmLibPlugAudioProcessor::hasSoundingNotes() const
 {
+    // Pending delayed note-ons are reserved but not yet on the wire - keep morph idle.
+    // Thru notes are OR'd inside MidiDeviceManager::syncNotesSounding.
+    // Held controller keys count as sounding so morph gating works when Forward is off.
     return lastAuditionNote >= 0 || ! controllerSoundingNotes.empty()
         || ! controllerHeldNotes.empty();
 }
@@ -1141,6 +1158,7 @@ void FmLibPlugAudioProcessor::autoTagLibrary (std::function<void()> onDone)
             batch.emplace_back (e.contentId, fmlib::AutoTagger::tagsForVoice (e.voice, e.voiceName));
         }
 
+        // The worker is joined in the destructor, but this batch can still be queued behind it.
         juce::MessageManager::callAsync ([this, epoch, alive, batch = std::move (batch), onDone]
         {
             if (! alive->load())
@@ -1150,6 +1168,7 @@ void FmLibPlugAudioProcessor::autoTagLibrary (std::function<void()> onDone)
                 autoTagRunning = false;
                 return;
             }
+            // Merge only: never wipe tags the user set manually via the Tags editor.
             for (const auto& [id, tagList] : batch)
                 for (const auto& t : tagList)
                     tags.addTag (id, t);
@@ -1180,6 +1199,7 @@ void FmLibPlugAudioProcessor::handleIncomingSysex (const std::vector<uint8_t>& b
         entries.push_back (std::move (e));
     }
     deviceBuffer.setVoices (std::move (entries));
+    // Device dump replaces the edit buffer / memory view - morph diffs need a fresh baseline.
     midi.invalidateMorphBaseline();
 }
 

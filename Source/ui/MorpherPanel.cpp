@@ -1150,11 +1150,13 @@ void MorpherPanel::mouseUp (const juce::MouseEvent& e)
         }
         else
         {
+            // Flush any throttled param-diff update first (ordered before the name dump).
             if (hadPending)
             {
                 lastMorphEmitMs = juce::Time::getMillisecondCounter();
                 emitMorph (true);
             }
+            // Force a full dump so the morph name is written even if VoiceData matched lastSent.
             lastSentVoice.reset();
             lastMorphEmitMs = juce::Time::getMillisecondCounter();
             emitMorph (false);
@@ -1166,6 +1168,7 @@ void MorpherPanel::mouseUp (const juce::MouseEvent& e)
     }
     else
     {
+        // Click: single full dump at the point.
         lastMorphEmitMs = juce::Time::getMillisecondCounter();
         emitMorph (false);
     }
@@ -1191,6 +1194,7 @@ void MorpherPanel::advanceLfo (double deltaSeconds)
     lfoPhase += (float) (deltaSeconds * (double) lfoRateHz);
     if (std::abs (lfoRateHz) < kMorphLfoPauseHz)
         return;
+    // Quantize to discrete perimeter steps so MIDI only updates on musical ticks.
     const float wrapped = lfoPhase - std::floor (lfoPhase);
     const int step = juce::jlimit (0, kMorphLfoStepsPerLoop - 1,
                                    (int) std::floor (wrapped * (float) kMorphLfoStepsPerLoop));
@@ -1199,6 +1203,7 @@ void MorpherPanel::advanceLfo (double deltaSeconds)
     lastLfoStep = step;
 
     const float qPhase = ((float) step + 0.5f) / (float) kMorphLfoStepsPerLoop;
+    // Direction comes from signed lfoPhase only — do not also mirror in edgePosition.
     morphPadEdgePosition (qPhase, true, posX, posY);
     tryEmitDrag();
     repaint();

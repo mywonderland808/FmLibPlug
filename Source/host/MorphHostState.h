@@ -43,6 +43,7 @@ enum class MorphLfoDivision : int
 };
 
 inline constexpr int kMorphLfoDivisionDefault = static_cast<int> (MorphLfoDivision::quarter);
+/** Fine perimeter steps — traffic limited by MorphTransport byte budget, not step count. */
 inline constexpr int kMorphLfoStepsPerLoop = 96;
 inline constexpr float kMorphLfoPauseHz = 0.02f;
 
