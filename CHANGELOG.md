@@ -7,13 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.5] - 2026-08-21
+
+### Added
+- **TX7 Globals** (under Device): Get/Reset Fn, resizable Voice-A sheet (Play, PB, porta, MW/FC/AT/BC); Attenuator **Apply** (performance bulk); Protect Off; dirty-only apply-with-voice-load
+- **Globals** page (`g=4` live): Memory Protect, note limits, MIDI/mode switches
+- Catch2 coverage for performance bulk, controller/attenuator accessors, dirty apply-with-load policy, and TX param-change encodings
+- [SECURITY.md](SECURITY.md) and [CONTRIBUTING.md](CONTRIBUTING.md) for public-repo hygiene
+
 ### Changed
+- Incoming SysEx routes format `0x01` to `FunctionBuffer` (not the voice device buffer); function dumps stay out of the library index
+- Bulk **Attenuator Apply** / apply-with-voice-load require a successful **Get Fn**; **Reset Fn** restores TX7 factory Voice-A function defaults (live params immediate; Atten still needs Apply after Get)
+- Yamaha param-change group byte uses `0ggggghh` packing (DX function `0x08`, TX function `0x11`)
 - README lead uses DX7/TX7–compatible wording; trademark, warranty, and cart-redistribution notes are near the top
 - Document copyright holder, third-party deps (JUCE, clap-juce-extensions, Catch2, CLAP), and VST/Dexed trademark notes
 - Pin `clap-juce-extensions` FetchContent to commit `c1a5ad0` (reproducible; not floating `main`)
-
-### Added
-- [SECURITY.md](SECURITY.md) and [CONTRIBUTING.md](CONTRIBUTING.md) for public-repo hygiene
 
 ## [1.3.0] - 2026-08-20
 

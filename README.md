@@ -1,6 +1,6 @@
 # FmLibPlug
 
-**Version 1.3.0** — AGPL-3.0 JUCE 8 MIDI librarian for **DX7 / TX7–compatible** voice SysEx.
+**Version 1.3.5** — AGPL-3.0 JUCE 8 MIDI librarian for **DX7 / TX7–compatible** voice SysEx.
 
 Product name: **FmLibPlug**. Compatibility only: FM SysEx librarian for DX7 mkI / TX7 hardware and compatible devices. Release notes: [CHANGELOG.md](CHANGELOG.md). Version source: `project(FmLibPlug VERSION ...)` in `CMakeLists.txt`. Cross-platform notes: [docs/PLATFORM.md](docs/PLATFORM.md).
 
@@ -18,6 +18,8 @@ Do **not** commit or redistribute third-party voice banks or cartridges. Keep lo
 - Right-click selects (no SysEx); left-click loads. **Set morph corner** does not pause morph
 - Load **1 voice** (edit buffer) or **32-voice bank** via direct MIDI out; audition note
 - Get / receive dumps into a temporary device buffer; drag-drop bank edit; **Send** (1 voice or full 32-bank) / **Save...**
+- **TX7 Globals** (under Device): Get/Reset Fn, resizable Voice-A sheet (play/PB/porta/controllers); Attenuator Apply (bulk); Protect Off; dirty-only apply-with-voice-load
+- **Globals** page: note limits, MIDI/mode switches, Memory Protect (`g=4` live)
 - Favorites + search (`fav:` / `star:` / `tag:` / `dupe:` / `recent:` / `:singles` / AND/OR) + auto-tag (merge); click Tags to edit; Reset all tags in Settings
 - XY morpher (4 corners + morph presets; parameter locks; edge LFO; Note morph via controller MIDI in)
 - Morph while playing: frequency-only (default) or all-parameter streaming (see below)
