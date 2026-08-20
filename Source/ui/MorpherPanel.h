@@ -11,8 +11,7 @@ namespace fmlib
 {
 
 class MorpherPanel : public juce::Component,
-                     private juce::ListBoxModel,
-                     private juce::Timer
+                     private juce::ListBoxModel
 {
 public:
     /** dragEmit: coalesced param stream. liveAllParams: stream locked-group changes even in freqOnly. */
@@ -21,7 +20,6 @@ public:
     using SaveToDeviceSlotFn = std::function<void(const VoiceData& voice, int slot1to32)>;
 
     MorpherPanel();
-    ~MorpherPanel() override;
 
     enum class Mode { morph, presets };
 
@@ -40,15 +38,10 @@ public:
     void applyPresetSnapshot (const MorphPreset& p);
     void syncMotionFromHost (int motionChoice, float lfoRateHz,
                              bool tempoSync = false, int division = 2);
-    void setProcessorOwnsMotion (bool on) { processorOwnsMotion = on; }
 
-    void jumpToRandomPosition();
-    void jumpToNextEdge();
     void setPresetStore (MorphPresetStore* store);
     MorphPreset currentAsPreset (const juce::String& name) const;
     bool allCornersReady() const;
-
-    void setEmitIntervalMs (int ms);
 
     void setLockGroups (uint32_t groups);
     uint32_t getLockGroups() const { return lockGroups; }
@@ -80,8 +73,6 @@ public:
     enum class NoteJumpMode { off = 0, random = 1, edges = 2 };
     void setNoteJumpMode (NoteJumpMode m);
     NoteJumpMode getNoteJumpMode() const { return noteJumpMode; }
-    /** Apply Off/Random/Edges jump; returns true if the pad moved (and morph was emitted). */
-    bool applyNoteJump();
 
     void resized() override;
     void paint (juce::Graphics& g) override;
@@ -120,10 +111,8 @@ private:
     void listBoxItemDoubleClicked (int row, const juce::MouseEvent&) override;
     void selectedRowsChanged (int lastRowSelected) override;
     void listBoxItemClicked (int row, const juce::MouseEvent&) override;
-    void timerCallback() override;
 
     void updatePositionFromPoint (juce::Point<float> p);
-    void tryEmitDrag();
     void emitMorph (bool dragEmit, bool liveAllParams = false);
     bool padContains (juce::Point<float> p) const;
     void cancelPadGesture();
@@ -152,10 +141,7 @@ private:
     void layoutLockChips (juce::Rectangle<int>& area, int minLeaveBelow);
     void syncLfoUi (bool relayout = true);
     void syncNoteJumpUi();
-    void ensureTimerRunning();
-    void advanceLfo (double deltaSeconds);
     void updateMorphControlsEnabled();
-    int effectiveEmitIntervalMs() const;
 
     Mode mode = Mode::morph;
     VoiceData corners[4] {};
@@ -164,12 +150,9 @@ private:
     float posX = 0.0f, posY = 0.0f;
     float lockRefX = 0.0f, lockRefY = 0.0f;
     float defaultLockRefX = 0.0f, defaultLockRefY = 0.0f;
-    uint32_t lastMorphEmitMs = 0;
-    int emitIntervalMs = 150;
     bool padDragging = false;
     bool lockRefDragging = false;
     bool padGesture = false;
-    bool pendingMorph = false;
     bool suppressPresetAutoLoad = false;
     juce::Point<float> padDownPos;
     std::optional<VoiceData> lastSentVoice;
@@ -181,13 +164,8 @@ private:
     float lfoRateHz = 0.25f;
     bool lfoTempoSync = false;
     int lfoDivisionChoice = 2;
-    float lfoPhase = 0.0f;
-    int lastLfoStep = -1;
-    uint32_t lastTimerMs = 0;
     NoteJumpMode noteJumpMode = NoteJumpMode::off;
-    int edgeJumpIndex = 0;
     bool hostParamSync = false;
-    bool processorOwnsMotion = false;
 
     juce::TextButton modeMorph { "Morph" }, modePresets { "Presets" };
     juce::TextButton assignA { "Set A" }, assignB { "Set B" }, assignC { "Set C" }, assignD { "Set D" };

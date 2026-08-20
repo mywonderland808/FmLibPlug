@@ -10,7 +10,6 @@ namespace fmlib
 namespace
 {
 constexpr float kPadDragThresholdPx = 4.0f;
-constexpr int kLfoTimerMs = 16;
 
 /** Width a toggle needs for its full label, using the tick-box metrics of LookAndFeel_V4. */
 int toggleWidthFor (const juce::ToggleButton& b, int height)
@@ -114,8 +113,7 @@ MorpherPanel::MorpherPanel()
         }
         if (onMorphMotionHostWrite)
             onMorphMotionHostWrite (choice);
-        else
-            setLfoEnabled (on);
+        updateHint();
         if (on)
             resumeEgressIfPaused();
         if (onMorphUiPrefsChanged)
@@ -203,12 +201,14 @@ MorpherPanel::MorpherPanel()
             const auto prev = noteJumpMode;
             noteJumpMode = m;
             if (m != NoteJumpMode::off)
+            {
                 lfoEnabled = false;
+                syncLfoUi (false);
+            }
             const int choice = static_cast<int> (m);
             if (onMorphMotionHostWrite)
                 onMorphMotionHostWrite (choice);
-            else
-                setNoteJumpMode (m);
+            updateHint();
             if (m != NoteJumpMode::off)
                 resumeEgressIfPaused();
             if (onMorphUiPrefsChanged)
@@ -255,22 +255,6 @@ MorpherPanel::MorpherPanel()
     saveToDevice.onClick = [this] { saveSelectedPresetToDeviceSlot(); };
 }
 
-MorpherPanel::~MorpherPanel()
-{
-    stopTimer();
-}
-
-void MorpherPanel::setEmitIntervalMs (int ms)
-{
-    emitIntervalMs = juce::jlimit (20, 250, ms);
-}
-
-int MorpherPanel::effectiveEmitIntervalMs() const
-{
-    // Transport owns wire budgeting; this only coalesces UI-side emitMorph calls.
-    return emitIntervalMs;
-}
-
 void MorpherPanel::setLockGroups (uint32_t groups)
 {
     lockGroups = groups & morphLockAllGroups;
@@ -297,8 +281,6 @@ void MorpherPanel::setLockRefPosition (float x, float y)
 void MorpherPanel::setEgressPaused (bool paused)
 {
     egressPaused = paused;
-    if (! egressPaused)
-        ensureTimerRunning();
 }
 
 void MorpherPanel::resumeEgressIfPaused()
@@ -320,10 +302,8 @@ void MorpherPanel::setDefaultLockRefPosition (float x, float y)
 void MorpherPanel::setLfoEnabled (bool on)
 {
     lfoEnabled = on;
-    lastLfoStep = -1;
     if (lfoEnabled)
     {
-        lastTimerMs = juce::Time::getMillisecondCounter();
         if (noteJumpMode != NoteJumpMode::off)
         {
             noteJumpMode = NoteJumpMode::off;
@@ -333,7 +313,6 @@ void MorpherPanel::setLfoEnabled (bool on)
     }
     syncLfoUi();
     updateHint();
-    ensureTimerRunning();
     repaint();
 }
 
@@ -349,9 +328,7 @@ void MorpherPanel::setNoteJumpMode (NoteJumpMode m)
     if (noteJumpMode != NoteJumpMode::off && lfoEnabled)
     {
         lfoEnabled = false;
-        lastLfoStep = -1;
         syncLfoUi();
-        ensureTimerRunning();
     }
     if (noteJumpMode != NoteJumpMode::off)
         resumeEgressIfPaused();
@@ -364,22 +341,6 @@ void MorpherPanel::syncNoteJumpUi()
     noteJumpOff.setToggleState (noteJumpMode == NoteJumpMode::off, juce::dontSendNotification);
     noteJumpRandom.setToggleState (noteJumpMode == NoteJumpMode::random, juce::dontSendNotification);
     noteJumpEdges.setToggleState (noteJumpMode == NoteJumpMode::edges, juce::dontSendNotification);
-}
-
-bool MorpherPanel::applyNoteJump()
-{
-    switch (noteJumpMode)
-    {
-        case NoteJumpMode::off:
-            return false;
-        case NoteJumpMode::random:
-            jumpToRandomPosition();
-            return true;
-        case NoteJumpMode::edges:
-            jumpToNextEdge();
-            return true;
-    }
-    return false;
 }
 
 void MorpherPanel::syncLfoUi (bool relayout)
@@ -497,7 +458,6 @@ void MorpherPanel::setMode (Mode m)
     saveToDevice.setVisible (! morph);
     if (! morph)
         refreshPresetList();
-    ensureTimerRunning();
     updateMorphControlsEnabled();
     resized();
     if (! morph)
@@ -596,8 +556,6 @@ void MorpherPanel::clearCorners()
     }
     posX = 0.0f;
     posY = 0.0f;
-    lfoPhase = 0.0f;
-    lastLfoStep = -1;
     lastSentVoice.reset();
     if (onMorphInvalidate)
         onMorphInvalidate();
@@ -612,7 +570,7 @@ void MorpherPanel::setMarkerPosition (float x, float y)
 {
     posX = juce::jlimit (0.0f, 1.0f, x);
     posY = juce::jlimit (0.0f, 1.0f, y);
-    if (processorOwnsMotion && onMorphPositionHostWrite)
+    if (onMorphPositionHostWrite)
         onMorphPositionHostWrite (posX, posY, false, false);
     else
         emitMorph (false);
@@ -651,8 +609,6 @@ void MorpherPanel::syncMotionFromHost (int motionChoice, float rateHz, bool temp
     syncNoteJumpUi();
     updateHint();
     updateMorphControlsEnabled();
-    if (! processorOwnsMotion)
-        ensureTimerRunning();
     hostParamSync = false;
     repaint();
 }
@@ -673,36 +629,12 @@ void MorpherPanel::applyPresetSnapshot (const MorphPreset& p)
     setLockRefFromHost (p.lockRefX, p.lockRefY);
     syncLockChipsFromFlags();
     lastSentVoice.reset();
-    lastLfoStep = -1;
-    lastTimerMs = juce::Time::getMillisecondCounter();
     if (onMorphInvalidate)
         onMorphInvalidate();
     egressPaused = false;
     updateHint();
     updateMorphControlsEnabled();
-    ensureTimerRunning();
     repaint();
-}
-
-void MorpherPanel::jumpToRandomPosition()
-{
-    if (mode != Mode::morph)
-        setMode (Mode::morph);
-    setMarkerPosition (juce::Random::getSystemRandom().nextFloat(),
-                       juce::Random::getSystemRandom().nextFloat());
-}
-
-void MorpherPanel::jumpToNextEdge()
-{
-    if (mode != Mode::morph)
-        setMode (Mode::morph);
-    // A(0,0) -> B(1,0) -> D(1,1) -> C(0,1)
-    static constexpr float kEdges[4][2] = {
-        { 0.0f, 0.0f }, { 1.0f, 0.0f }, { 1.0f, 1.0f }, { 0.0f, 1.0f }
-    };
-    const auto& e = kEdges[static_cast<size_t> (edgeJumpIndex & 3)];
-    edgeJumpIndex = (edgeJumpIndex + 1) & 3;
-    setMarkerPosition (e[0], e[1]);
 }
 
 void MorpherPanel::setPresetStore (MorphPresetStore* s)
@@ -993,7 +925,7 @@ void MorpherPanel::commitLockRef()
     if (onMorphUiPrefsChanged)
         onMorphUiPrefsChanged();
     lastSentVoice.reset();
-    if (processorOwnsMotion && onLockRefHostWrite)
+    if (onLockRefHostWrite)
     {
         onLockRefHostWrite (lockRefX, lockRefY, false, true);
         if (onStatus)
@@ -1027,7 +959,6 @@ void MorpherPanel::cancelPadGesture()
     padGesture = false;
     padDragging = false;
     lockRefDragging = false;
-    pendingMorph = false;
     if (wasLive)
         repaint();
 }
@@ -1067,16 +998,13 @@ void MorpherPanel::mouseDown (const juce::MouseEvent& e)
     padGesture = true;
     lockRefDragging = false;
     padDragging = false;
-    pendingMorph = false;
-    if (! lfoEnabled)
-        stopTimer();
     if (egressPaused)
         setEgressPaused (false);
     if (onPadGestureStarted)
         onPadGestureStarted();
     padDownPos = e.position;
     updatePositionFromPoint (e.position);
-    if (processorOwnsMotion && onMorphPositionHostWrite)
+    if (onMorphPositionHostWrite)
         onMorphPositionHostWrite (posX, posY, true, false);
     repaint();
 }
@@ -1099,13 +1027,8 @@ void MorpherPanel::mouseDrag (const juce::MouseEvent& e)
         padDragging = true;
 
     updatePositionFromPoint (e.position);
-    if (padDragging)
-    {
-        if (processorOwnsMotion && onMorphPositionHostWrite)
-            onMorphPositionHostWrite (posX, posY, false, false);
-        else
-            tryEmitDrag();
-    }
+    if (padDragging && onMorphPositionHostWrite)
+        onMorphPositionHostWrite (posX, posY, false, false);
     repaint();
 }
 
@@ -1133,47 +1056,22 @@ void MorpherPanel::mouseUp (const juce::MouseEvent& e)
     updatePositionFromPoint (e.position);
 
     const bool wasDrag = padDragging;
-    const bool hadPending = pendingMorph;
     padDragging = false;
-    pendingMorph = false;
-
-    // Cancel coalesced drag timer so a late param burst cannot land after the final dump.
-    if (! lfoEnabled)
-        stopTimer();
 
     if (wasDrag)
     {
-        if (processorOwnsMotion && onMorphPositionHostWrite)
+        if (onMorphPositionHostWrite)
         {
             lastSentVoice.reset();
             onMorphPositionHostWrite (posX, posY, false, true);
         }
-        else
-        {
-            // Flush any throttled param-diff update first (ordered before the name dump).
-            if (hadPending)
-            {
-                lastMorphEmitMs = juce::Time::getMillisecondCounter();
-                emitMorph (true);
-            }
-            // Force a full dump so the morph name is written even if VoiceData matched lastSent.
-            lastSentVoice.reset();
-            lastMorphEmitMs = juce::Time::getMillisecondCounter();
-            emitMorph (false);
-        }
     }
-    else if (processorOwnsMotion && onMorphPositionHostWrite)
+    else if (onMorphPositionHostWrite)
     {
-        onMorphPositionHostWrite (posX, posY, true, true);
-    }
-    else
-    {
-        // Click: single full dump at the point.
-        lastMorphEmitMs = juce::Time::getMillisecondCounter();
-        emitMorph (false);
+        // mouseDown already began the gesture — end it here for a click.
+        onMorphPositionHostWrite (posX, posY, false, true);
     }
 
-    ensureTimerRunning();
     repaint();
 }
 
@@ -1181,99 +1079,6 @@ void MorpherPanel::updatePositionFromPoint (juce::Point<float> p)
 {
     posX = juce::jlimit (0.0f, 1.0f, (p.x - (float) padBounds.getX()) / (float) padBounds.getWidth());
     posY = juce::jlimit (0.0f, 1.0f, (p.y - (float) padBounds.getY()) / (float) padBounds.getHeight());
-}
-
-void MorpherPanel::advanceLfo (double deltaSeconds)
-{
-    if (processorOwnsMotion)
-        return;
-    if (! lfoEnabled || padDragging || lockRefDragging || mode != Mode::morph || ! allCornersReady()
-        || egressPaused)
-        return;
-
-    lfoPhase += (float) (deltaSeconds * (double) lfoRateHz);
-    if (std::abs (lfoRateHz) < kMorphLfoPauseHz)
-        return;
-    // Quantize to discrete perimeter steps so MIDI only updates on musical ticks.
-    const float wrapped = lfoPhase - std::floor (lfoPhase);
-    const int step = juce::jlimit (0, kMorphLfoStepsPerLoop - 1,
-                                   (int) std::floor (wrapped * (float) kMorphLfoStepsPerLoop));
-    if (step == lastLfoStep)
-        return;
-    lastLfoStep = step;
-
-    const float qPhase = ((float) step + 0.5f) / (float) kMorphLfoStepsPerLoop;
-    // Direction comes from signed lfoPhase only — do not also mirror in edgePosition.
-    morphPadEdgePosition (qPhase, true, posX, posY);
-    tryEmitDrag();
-    repaint();
-}
-
-void MorpherPanel::ensureTimerRunning()
-{
-    if (lfoEnabled && mode == Mode::morph)
-    {
-        if (! isTimerRunning() || getTimerInterval() != kLfoTimerMs)
-            startTimer (kLfoTimerMs);
-        return;
-    }
-    if (pendingMorph && padDragging)
-        return;
-    if (! pendingMorph)
-        stopTimer();
-}
-
-void MorpherPanel::tryEmitDrag()
-{
-    const auto now = juce::Time::getMillisecondCounter();
-    const int interval = effectiveEmitIntervalMs();
-    const auto elapsed = now - lastMorphEmitMs;
-    if (elapsed < (uint32_t) interval)
-    {
-        pendingMorph = true;
-        // The LFO timer is already running and will flush the pending emit itself.
-        if (! (lfoEnabled && mode == Mode::morph) && ! isTimerRunning())
-        {
-            const int wait = juce::jmax (1, interval - (int) elapsed);
-            startTimer (wait);
-        }
-        return;
-    }
-    pendingMorph = false;
-    if (! (lfoEnabled && mode == Mode::morph))
-        stopTimer();
-    lastMorphEmitMs = now;
-    emitMorph (true);
-}
-
-void MorpherPanel::timerCallback()
-{
-    const auto now = juce::Time::getMillisecondCounter();
-    if (lfoEnabled && mode == Mode::morph)
-    {
-        const double dt = lastTimerMs == 0 ? 0.0 : (double) (now - lastTimerMs) * 0.001;
-        lastTimerMs = now;
-        advanceLfo (dt);
-        if (pendingMorph && ! padDragging)
-        {
-            const auto elapsed = now - lastMorphEmitMs;
-            if (elapsed >= (uint32_t) effectiveEmitIntervalMs())
-            {
-                pendingMorph = false;
-                lastMorphEmitMs = now;
-                emitMorph (true);
-            }
-        }
-        return;
-    }
-
-    // One-shot coalesced drag emit — only while still dragging.
-    stopTimer();
-    if (! pendingMorph || ! padDragging)
-        return;
-    pendingMorph = false;
-    lastMorphEmitMs = now;
-    emitMorph (true);
 }
 
 void MorpherPanel::emitMorph (bool dragEmit, bool liveAllParams)
@@ -1338,15 +1143,12 @@ void MorpherPanel::loadSelectedPreset (bool switchToMorphPad)
     lockRefY = juce::jlimit (0.0f, 1.0f, p.lockRefY);
     syncLockChipsFromFlags();
     lastSentVoice.reset();
-    lastLfoStep = -1;
-    lastTimerMs = juce::Time::getMillisecondCounter();
     if (onMorphInvalidate)
         onMorphInvalidate();
     egressPaused = false;
     updateHint();
     updateMorphControlsEnabled();
     emitMorph (false);
-    ensureTimerRunning();
     repaint();
 
     if (onPresetApplied)

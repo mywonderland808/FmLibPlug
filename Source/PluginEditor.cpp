@@ -44,8 +44,6 @@ FmLibPlugAudioProcessorEditor::FmLibPlugAudioProcessorEditor (FmLibPlugAudioProc
     devicePanel.setBuffer (&plugin.deviceBuffer);
     devicePanel.onStatus = [this] (const juce::String& s) { setMidiStatus (s); };
     morpher.setPresetStore (&plugin.morphPresets);
-    morpher.setProcessorOwnsMotion (true);
-    morpher.setEmitIntervalMs (plugin.prefs.morphEmitMs);
     morpher.setDefaultLockGroups (plugin.prefs.morphLockGroups);
     morpher.setLockGroups (plugin.prefs.morphLockGroups);
     morpher.setDefaultLockRefPosition (plugin.prefs.morphLockRefX, plugin.prefs.morphLockRefY);
@@ -659,7 +657,6 @@ void FmLibPlugAudioProcessorEditor::syncMorphPrefsFromSettings (bool persist)
     plugin.prefs.morphNoteSettleMs = settings.getMorphNoteSettleMs();
     plugin.prefs.midiControllerThru = settings.getMidiControllerThru();
     plugin.prefs.morphStreamMode = settings.getMorphStreamMode();
-    morpher.setEmitIntervalMs (plugin.prefs.morphEmitMs);
     plugin.midi.setMorphReleaseGuardMs (plugin.prefs.morphReleaseGuardMs);
     plugin.midi.setControllerThru (plugin.prefs.midiControllerThru);
     plugin.midi.setMorphStreamMode (static_cast<fmlib::MorphStreamMode> (
