@@ -5,9 +5,41 @@
 
 namespace fmlib
 {
+
+namespace
+{
+const std::vector<std::string> kEmptyTags;
+const std::string kEmptyJoined;
+} // namespace
+
+void TagStore::refreshJoined (uint64_t contentId)
+{
+    auto it = tagsById.find (contentId);
+    if (it == tagsById.end() || it->second.empty())
+    {
+        joinedById.erase (contentId);
+        return;
+    }
+    std::string s;
+    for (size_t i = 0; i < it->second.size(); ++i)
+    {
+        if (i > 0)
+            s += ',';
+        s += it->second[i];
+    }
+    joinedById[contentId] = std::move (s);
+}
+
+void TagStore::eraseEntry (uint64_t contentId)
+{
+    tagsById.erase (contentId);
+    joinedById.erase (contentId);
+}
+
 void TagStore::clear()
 {
     tagsById.clear();
+    joinedById.clear();
 }
 
 void TagStore::setTags (uint64_t contentId, std::vector<std::string> tags)
@@ -18,9 +50,12 @@ void TagStore::setTags (uint64_t contentId, std::vector<std::string> tags)
                                 [] (const std::string& t) { return t.empty(); }),
                 tags.end());
     if (tags.empty())
-        tagsById.erase (contentId);
-    else
-        tagsById[contentId] = std::move (tags);
+    {
+        eraseEntry (contentId);
+        return;
+    }
+    tagsById[contentId] = std::move (tags);
+    refreshJoined (contentId);
 }
 
 void TagStore::addTag (uint64_t contentId, const std::string& tag)
@@ -30,7 +65,10 @@ void TagStore::addTag (uint64_t contentId, const std::string& tag)
         return;
     auto& v = tagsById[contentId];
     if (std::find (v.begin(), v.end(), t) == v.end())
+    {
         v.push_back (t);
+        refreshJoined (contentId);
+    }
 }
 
 void TagStore::removeTag (uint64_t contentId, const std::string& tag)
@@ -42,19 +80,29 @@ void TagStore::removeTag (uint64_t contentId, const std::string& tag)
     auto& v = it->second;
     v.erase (std::remove (v.begin(), v.end(), t), v.end());
     if (v.empty())
-        tagsById.erase (it);
+        eraseEntry (contentId);
+    else
+        refreshJoined (contentId);
 }
 
 void TagStore::clearTags (uint64_t contentId)
 {
-    tagsById.erase (contentId);
+    eraseEntry (contentId);
 }
 
-std::vector<std::string> TagStore::getTags (uint64_t contentId) const
+const std::vector<std::string>& TagStore::getTags (uint64_t contentId) const
 {
     auto it = tagsById.find (contentId);
     if (it == tagsById.end())
-        return {};
+        return kEmptyTags;
+    return it->second;
+}
+
+const std::string& TagStore::displayJoined (uint64_t contentId) const
+{
+    auto it = joinedById.find (contentId);
+    if (it == joinedById.end())
+        return kEmptyJoined;
     return it->second;
 }
 

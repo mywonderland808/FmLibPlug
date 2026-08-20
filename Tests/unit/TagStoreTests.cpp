@@ -58,6 +58,26 @@ TEST_CASE ("TagStore stores single as a normal tag", "[library][tags]")
     REQUIRE (store.allUniqueTags() == std::vector<std::string> { "bass", "single" });
 }
 
+TEST_CASE ("TagStore displayJoined caches and invalidates", "[library][tags]")
+{
+    TagStore store;
+    REQUIRE (store.displayJoined (7).empty());
+
+    store.setTags (7, { "pad", "dark" });
+    REQUIRE (store.displayJoined (7) == "pad,dark");
+    REQUIRE (&store.displayJoined (7) == &store.displayJoined (7));
+
+    store.addTag (7, "bass");
+    REQUIRE (store.displayJoined (7) == "pad,dark,bass");
+
+    store.removeTag (7, "dark");
+    REQUIRE (store.displayJoined (7) == "pad,bass");
+
+    store.clearTags (7);
+    REQUIRE (store.displayJoined (7).empty());
+    REQUIRE (store.getTags (7).empty());
+}
+
 TEST_CASE ("LibraryFilter tag token", "[library][filter][tags]")
 {
     TagStore tags;
