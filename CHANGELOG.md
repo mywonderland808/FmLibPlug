@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- README lead uses DX7/TX7–compatible wording; trademark, warranty, and cart-redistribution notes are near the top
+- Document copyright holder, third-party deps (JUCE, clap-juce-extensions, Catch2, CLAP), and VST/Dexed trademark notes
+- Pin `clap-juce-extensions` FetchContent to commit `c1a5ad0` (reproducible; not floating `main`)
+
+### Added
+- [SECURITY.md](SECURITY.md) and [CONTRIBUTING.md](CONTRIBUTING.md) for public-repo hygiene
+
 ## [1.3.0] - 2026-08-20
 
 ### Added

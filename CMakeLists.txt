@@ -131,11 +131,12 @@ target_link_libraries(FmLibPlug
 )
 
 if(FMLIBPLUG_BUILD_CLAP)
+  # Pin a commit (not `main`): release tags 0.24–0.26 are pre-JUCE-8; this SHA is the
+  # known-good tip used with JUCE 8.0.14 (shallow clone needs a branch/tag tip).
   FetchContent_Declare(
     clap-juce-extensions
     GIT_REPOSITORY https://github.com/free-audio/clap-juce-extensions.git
-    GIT_TAG main
-    GIT_SHALLOW TRUE
+    GIT_TAG c1a5ad025f95d01e03267857fa8276ebeed16500
   )
   FetchContent_MakeAvailable(clap-juce-extensions)
   clap_juce_extensions_plugin(
