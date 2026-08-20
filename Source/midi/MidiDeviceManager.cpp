@@ -98,6 +98,7 @@ bool MidiDeviceManager::openControllerInputByName (const juce::String& name)
     controllerInputName.clear();
     hostControllerInput = false;
     clearThruHeldNotes();
+    discardThruRing();
     if (name.isEmpty())
     {
         setStatus ("MIDI controller input closed");
@@ -144,6 +145,7 @@ bool MidiDeviceManager::openOutputByName (const juce::String& name)
         const juce::ScopedLock sl (hostOutLock);
         hostOutQueue.clear();
     }
+    discardThruRing();
 
     if (name.isEmpty())
     {
@@ -210,6 +212,7 @@ void MidiDeviceManager::close()
         hostOutQueue.clear();
     }
     clearThruHeldNotes();
+    discardThruRing();
     morphBusyUntilMs = 0.0;
     notesQuietAtMs = 0.0;
     notesSoundingLatched = false;
@@ -217,14 +220,78 @@ void MidiDeviceManager::close()
 
 void MidiDeviceManager::clearThruHeldNotes()
 {
-    const juce::ScopedLock sl (thruLock);
-    thruHeldNotes.clear();
+    thruHeldLo.store (0, std::memory_order_relaxed);
+    thruHeldHi.store (0, std::memory_order_relaxed);
+}
+
+void MidiDeviceManager::setThruHeldNoteBit (int note, bool held)
+{
+    const int n = juce::jlimit (0, 127, note);
+    auto& word = (n < 64) ? thruHeldLo : thruHeldHi;
+    const uint64_t mask = uint64_t (1) << (n & 63);
+    if (held)
+        word.fetch_or (mask, std::memory_order_relaxed);
+    else
+        word.fetch_and (~mask, std::memory_order_relaxed);
 }
 
 bool MidiDeviceManager::hasThruNotesSounding() const
 {
-    const juce::ScopedLock sl (thruLock);
-    return ! thruHeldNotes.empty();
+    return thruHeldLo.load (std::memory_order_relaxed) != 0
+        || thruHeldHi.load (std::memory_order_relaxed) != 0;
+}
+
+void MidiDeviceManager::discardThruRing()
+{
+    thruFifo.reset();
+    thruFlushQueued.store (false, std::memory_order_relaxed);
+}
+
+void MidiDeviceManager::requestThruFlush()
+{
+    bool expected = false;
+    if (! thruFlushQueued.compare_exchange_strong (expected, true, std::memory_order_acq_rel))
+        return;
+
+    juce::MessageManager::callAsync ([this, alive = alive]
+    {
+        if (! alive->load())
+            return;
+        flushThruRing();
+    });
+}
+
+void MidiDeviceManager::flushThruRing()
+{
+    // Message thread only — safe to touch MidiOutput::sendMessageNow.
+    for (;;)
+    {
+        int start1 = 0, size1 = 0, start2 = 0, size2 = 0;
+        thruFifo.prepareToRead (thruFifo.getNumReady(), start1, size1, start2, size2);
+        const int total = size1 + size2;
+        if (total <= 0)
+        {
+            thruFlushQueued.store (false, std::memory_order_release);
+            // Race: a writer may have pushed after we saw empty but before clearing the flag.
+            if (thruFifo.getNumReady() > 0)
+                requestThruFlush();
+            return;
+        }
+
+        auto sendPod = [this] (const ThruPod& pod)
+        {
+            if (pod.size == 0 || pod.size > 3)
+                return;
+            sendMessageNowLocked (juce::MidiMessage (pod.data, (int) pod.size));
+        };
+
+        for (int i = 0; i < size1; ++i)
+            sendPod (thruRing[(size_t) (start1 + i)]);
+        for (int i = 0; i < size2; ++i)
+            sendPod (thruRing[(size_t) (start2 + i)]);
+
+        thruFifo.finishedRead (total);
+    }
 }
 
 int MidiDeviceManager::getMorphWireBusyRemainingMs() const
@@ -380,15 +447,48 @@ void MidiDeviceManager::thruControllerMessageIfEnabled (const juce::MidiMessage&
         || message.isSysEx() || skipNoteThru)
         return;
 
-    sendMessageNowLocked (message);
+    // Host out: same-block thru via the host queue — never touch hardware from here.
+    if (hostOutput)
     {
-        // Track thru notes under lock; morph sounding is updated on the message thread.
-        const juce::ScopedLock sl (thruLock);
+        enqueueHostOutput (message);
         if (isNoteOn)
-            thruHeldNotes.insert (note);
+            setThruHeldNoteBit (note, true);
         else if (isNoteOff)
-            thruHeldNotes.erase (note);
+            setThruHeldNoteBit (note, false);
+        return;
     }
+
+    // Hardware out: copy raw bytes into the POD ring; flush on the message thread.
+    // Overflow: drop the event. Prefer clearing note-off held bits over stuck notes under flood.
+    const auto* raw = message.getRawData();
+    const int rawSize = message.getRawDataSize();
+    if (raw == nullptr || rawSize < 1 || rawSize > 3)
+        return;
+
+    ThruPod pod;
+    pod.size = (uint8_t) rawSize;
+    for (int i = 0; i < rawSize; ++i)
+        pod.data[(size_t) i] = raw[i];
+
+    int start1 = 0, size1 = 0, start2 = 0, size2 = 0;
+    thruFifo.prepareToWrite (1, start1, size1, start2, size2);
+    if (size1 + size2 < 1)
+    {
+        if (isNoteOff)
+            setThruHeldNoteBit (note, false);
+        return;
+    }
+
+    thruRing[(size_t) start1] = pod;
+    thruFifo.finishedWrite (1);
+
+    if (isNoteOn)
+        setThruHeldNoteBit (note, true);
+    else if (isNoteOff)
+        setThruHeldNoteBit (note, false);
+
+    // Always arm a flush while the ring is non-empty (not only empty→nonempty).
+    requestThruFlush();
 }
 
 void MidiDeviceManager::handleControllerMessage (const juce::MidiMessage& message, bool thruAlreadyHandled)
@@ -585,6 +685,8 @@ bool MidiDeviceManager::sendMorphVoice (const VoiceData& voice, bool forceCommit
 
 void MidiDeviceManager::timerCallback()
 {
+    flushThruRing();
+
     const bool appSounding = notesSoundingFn ? notesSoundingFn() : false;
     updateNotesSounding (appSounding || hasThruNotesSounding());
 

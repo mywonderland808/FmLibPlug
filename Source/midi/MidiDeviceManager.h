@@ -3,10 +3,11 @@
 #include "midi/MorphTransport.h"
 #include "sysex/Dx7Formats.h"
 #include <juce_audio_devices/juce_audio_devices.h>
+#include <array>
 #include <atomic>
+#include <cstdint>
 #include <functional>
 #include <memory>
-#include <set>
 #include <vector>
 
 namespace fmlib
@@ -124,9 +125,22 @@ private:
     void handleDeviceSysex (const juce::MidiMessage& message);
     void ensureMorphTimer();
     void clearThruHeldNotes();
+    void setThruHeldNoteBit (int note, bool held);
+    void flushThruRing();
+    void requestThruFlush();
+    void discardThruRing();
     void updateNotesSounding (bool sounding);
     bool inMorphReleaseGuard() const;
     static int estimateSysexWireMs (int byteCount);
+
+    /** Short MIDI events deferred from audio/MIDI callback to the message thread (hardware out). */
+    struct ThruPod
+    {
+        uint8_t data[3] {};
+        uint8_t size = 0; // 1..3
+    };
+
+    static constexpr int kThruRingSize = 512;
 
     std::unique_ptr<juce::MidiInput> input;
     std::unique_ptr<juce::MidiInput> controllerInput;
@@ -149,11 +163,17 @@ private:
     std::atomic<bool> controllerNotesToCallbacksOnly { false };
     bool bgThreadStarted = false;
     juce::CriticalSection outputLock;
-    mutable juce::CriticalSection thruLock;
+
+    juce::AbstractFifo thruFifo { kThruRingSize };
+    std::array<ThruPod, kThruRingSize> thruRing {};
+    /** True while a message-thread flush is queued or running. */
+    std::atomic<bool> thruFlushQueued { false };
 
     MorphTransport morph;
     NotesSoundingFn notesSoundingFn;
-    std::set<int> thruHeldNotes;
+    /** Note 0..63 in lo, 64..127 in hi — lock-free for audio-thread thru. */
+    std::atomic<uint64_t> thruHeldLo { 0 };
+    std::atomic<uint64_t> thruHeldHi { 0 };
     double morphBusyUntilMs = 0.0;
     double notesQuietAtMs = 0.0;
     bool notesSoundingLatched = false;

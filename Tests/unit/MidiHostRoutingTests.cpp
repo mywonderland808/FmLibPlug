@@ -71,6 +71,29 @@ TEST_CASE ("Forward controller MIDI to (DAW) out is same-block and skips notes i
     REQUIRE (buf.getNumEvents() == 1);
 }
 
+// Host thru updates lock-free held-note bits (same helpers hardware thru uses before
+// pushing ThruPods into the AbstractFifo ring — hardware send is message-thread only).
+TEST_CASE ("Controller thru held-note bits track note on/off with host out", "[midi][host][thru]")
+{
+    MidiDeviceManager midi;
+    REQUIRE (midi.openControllerInputByName (kDawMidiPortName));
+    REQUIRE (midi.openOutputByName (kDawMidiPortName));
+    midi.setControllerThru (true);
+    REQUIRE_FALSE (midi.hasThruNotesSounding());
+
+    juce::MidiBuffer buf;
+    buf.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100), 0);
+    midi.exchangeHostMidi (buf);
+    REQUIRE (buf.getNumEvents() == 1);
+    REQUIRE (midi.hasThruNotesSounding());
+
+    buf.clear();
+    buf.addEvent (juce::MidiMessage::noteOff (1, 60), 0);
+    midi.exchangeHostMidi (buf);
+    REQUIRE (buf.getNumEvents() == 1);
+    REQUIRE_FALSE (midi.hasThruNotesSounding());
+}
+
 TEST_CASE ("(DAW) SysEx pacing holds later packets for a later block", "[midi][host]")
 {
     MidiDeviceManager midi;
