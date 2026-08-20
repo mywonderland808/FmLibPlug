@@ -102,12 +102,14 @@ private:
     void rebuildTagStripButtons (int forWidth = 0);
     void updateTagFilterHeader();
     std::vector<std::string> tagFilterCatalog() const;
-    std::vector<std::string> tagsForDisplay (const PatchEntry& e) const;
+    const std::vector<std::string>& tagsForDisplay (const PatchMeta& m) const;
     /** Returns tag name under local cell point, or empty if none. */
     std::string tagAtCellPoint (int row, int width, int height, juce::Point<float> local) const;
     void applyColumnSort (std::vector<PatchEntry>& voices, bool keepBankGroups) const;
     int compareEntries (const PatchEntry& a, const PatchEntry& b) const;
-    static juce::String folderColumnText (const PatchEntry& e);
+    static juce::String folderColumnText (const PatchMeta& m);
+    /** Lazy full entry from `all` by absolutePath + bankSlot. */
+    std::optional<PatchEntry> resolveEntry (const PatchMeta& m) const;
 
     class SearchField : public juce::TextEditor
     {

@@ -277,10 +277,11 @@ void PatchBrowser::setEntries (std::vector<PatchEntry> entries, FavoritesStore* 
                                RecentStore* recent)
 {
     all = std::move (entries);
-    for (auto& e : all)
+    for (size_t i = 0; i < all.size(); ++i)
     {
-        if (e.voiceNameLower.empty() || e.nameSortKey.empty())
-            e.refreshSearchCache();
+        all[i].libraryIndex = static_cast<int> (i);
+        if (all[i].voiceNameLower.empty() || all[i].nameSortKey.empty())
+            all[i].refreshSearchCache();
     }
     favStore = favorites;
     tagStore = tags;
@@ -295,7 +296,29 @@ std::optional<PatchEntry> PatchBrowser::getSelectedVoice() const
     const int row = selectedVoiceRow();
     if (row < 0)
         return std::nullopt;
-    return rows[static_cast<size_t> (row)].entry;
+    return resolveEntry (rows[static_cast<size_t> (row)].meta);
+}
+
+std::optional<PatchEntry> PatchBrowser::resolveEntry (const PatchMeta& m) const
+{
+    if (juce::isPositiveAndBelow (m.libraryIndex, static_cast<int> (all.size())))
+    {
+        const auto& e = all[static_cast<size_t> (m.libraryIndex)];
+        if (e.libraryIndex == m.libraryIndex
+            && e.absolutePath == m.absolutePath
+            && e.bankSlot == m.bankSlot)
+            return e;
+    }
+
+    // Fallback if indices were invalidated mid-rescan: path + slot, then contentId for singles.
+    for (const auto& e : all)
+    {
+        if (e.absolutePath != m.absolutePath || e.bankSlot != m.bankSlot)
+            continue;
+        if (m.bankSlot > 0 || e.contentId == m.contentId)
+            return e;
+    }
+    return std::nullopt;
 }
 
 void PatchBrowser::resized()
@@ -369,9 +392,10 @@ std::vector<std::string> PatchBrowser::tagFilterCatalog() const
     return tagStore != nullptr ? tagStore->allUniqueTags() : std::vector<std::string> {};
 }
 
-std::vector<std::string> PatchBrowser::tagsForDisplay (const PatchEntry& e) const
+const std::vector<std::string>& PatchBrowser::tagsForDisplay (const PatchMeta& m) const
 {
-    return tagStore != nullptr ? tagStore->getTags (e.contentId) : std::vector<std::string> {};
+    static const std::vector<std::string> empty;
+    return tagStore != nullptr ? tagStore->getTags (m.contentId) : empty;
 }
 
 void PatchBrowser::refreshTagStrip()
@@ -599,7 +623,7 @@ bool PatchBrowser::toggleFavoriteOnSelection()
     const int row = selectedVoiceRow();
     if (row < 0 || ! onFav)
         return false;
-    onFav (rows[static_cast<size_t> (row)].entry.contentId);
+    onFav (rows[static_cast<size_t> (row)].meta.contentId);
     if (favOnly.getToggleState())
         rebuildFiltered();
     else
@@ -661,17 +685,10 @@ int PatchBrowser::compareEntries (const PatchEntry& a, const PatchEntry& b) cons
     {
         return e.relativePathLower.empty() ? e.relativePath : e.relativePathLower;
     };
-    auto tagsOf = [this] (const PatchEntry& e) -> std::string
+    auto tagsOf = [this] (const PatchEntry& e) -> const std::string&
     {
-        const auto tags = tagsForDisplay (e);
-        std::string s;
-        for (size_t i = 0; i < tags.size(); ++i)
-        {
-            if (i > 0)
-                s += ',';
-            s += tags[i];
-        }
-        return s;
+        static const std::string empty;
+        return tagStore != nullptr ? tagStore->displayJoined (e.contentId) : empty;
     };
 
     switch (sortColumnId)
@@ -710,8 +727,8 @@ int PatchBrowser::compareEntries (const PatchEntry& a, const PatchEntry& b) cons
         }
         case 6:
         {
-            const auto ta = tagsOf (a);
-            const auto tb = tagsOf (b);
+            const auto& ta = tagsOf (a);
+            const auto& tb = tagsOf (b);
             if (ta < tb)
                 return -1;
             if (tb < ta)
@@ -824,9 +841,9 @@ void PatchBrowser::sortOrderChanged (int newSortColumnId, bool isForwards)
 
 void PatchBrowser::rebuildFiltered()
 {
-    std::optional<PatchEntry> keepSelected;
+    std::optional<PatchMeta> keepSelected;
     if (const int sel = selectedVoiceRow(); sel >= 0)
-        keepSelected = rows[static_cast<size_t> (sel)].entry;
+        keepSelected = rows[static_cast<size_t> (sel)].meta;
 
     FavoritesStore empty;
     const auto* store = favStore != nullptr ? favStore : &empty;
@@ -872,8 +889,12 @@ void PatchBrowser::rebuildFiltered()
         {
             if (rows[static_cast<size_t> (i)].kind != BrowserRowKind::voice)
                 continue;
-            const auto& e = rows[static_cast<size_t> (i)].entry;
-            if (e.absolutePath == keepSelected->absolutePath && e.bankSlot == keepSelected->bankSlot)
+            const auto& e = rows[static_cast<size_t> (i)].meta;
+            if (keepSelected->libraryIndex >= 0
+                    ? e.libraryIndex == keepSelected->libraryIndex
+                    : (e.absolutePath == keepSelected->absolutePath
+                       && e.bankSlot == keepSelected->bankSlot
+                       && e.contentId == keepSelected->contentId))
             {
                 table.selectRow (i, false, false);
                 lastSentRow = i;
@@ -924,7 +945,7 @@ void PatchBrowser::updateStickyHeader()
     }
     else if (rows[static_cast<size_t> (row)].kind == BrowserRowKind::voice)
     {
-        stickyBank.setText ("Bank: " + toJuce (rows[static_cast<size_t> (row)].entry.fileName),
+        stickyBank.setText ("Bank: " + toJuce (rows[static_cast<size_t> (row)].meta.fileName),
                             juce::dontSendNotification);
     }
 }
@@ -948,16 +969,16 @@ void PatchBrowser::paintRowBackground (juce::Graphics& g, int row, int width, in
                          : findColour (juce::ListBox::backgroundColourId));
 }
 
-juce::String PatchBrowser::folderColumnText (const PatchEntry& e)
+juce::String PatchBrowser::folderColumnText (const PatchMeta& m)
 {
-    if (! e.relativePath.empty())
+    if (! m.relativePath.empty())
     {
-        const auto parent = std::filesystem::path (e.relativePath).parent_path();
+        const auto parent = std::filesystem::path (m.relativePath).parent_path();
         if (! parent.empty())
             return juce::String::fromUTF8 (parent.generic_string().c_str());
     }
-    if (! e.baseFolder.empty())
-        return juce::String::fromUTF8 (e.baseFolder.filename().string().c_str());
+    if (! m.baseFolder.empty())
+        return juce::String::fromUTF8 (m.baseFolder.filename().string().c_str());
     return ".";
 }
 
@@ -1009,7 +1030,7 @@ void PatchBrowser::paintCell (juce::Graphics& g, int row, int columnId, int widt
         return;
     }
 
-    const auto& e = r.entry;
+    const auto& e = r.meta;
     if (columnId == 1)
     {
         const bool fav = favStore != nullptr && favStore->isFavorite (e.contentId);
@@ -1061,7 +1082,7 @@ juce::String PatchBrowser::getCellTooltip (int rowNumber, int columnId)
         return {};
     if (columnId == 6)
         return "Click a tag to filter. Shift = AND, Ctrl or Cmd = OR, Alt = edit tags. Right-click a voice for more.";
-    const auto& e = rows[static_cast<size_t> (rowNumber)].entry;
+    const auto& e = rows[static_cast<size_t> (rowNumber)].meta;
     return juce::String::fromUTF8 (e.fileName.c_str()) + " - "
          + juce::String::fromUTF8 (e.absolutePath.string().c_str());
 }
@@ -1075,7 +1096,7 @@ juce::var PatchBrowser::getDragSourceDescription (const juce::SparseSet<int>& ro
         return {};
     if (rows[static_cast<size_t> (row)].kind != BrowserRowKind::voice)
         return {};
-    draggedVoice = rows[static_cast<size_t> (row)].entry;
+    draggedVoice = resolveEntry (rows[static_cast<size_t> (row)].meta);
     return juce::var ("fmlib-voice");
 }
 
@@ -1087,8 +1108,11 @@ void PatchBrowser::loadRow (int row, bool loadBank)
         return;
     if (! loadBank && row == lastSentRow)
         return;
+    auto entry = resolveEntry (rows[static_cast<size_t> (row)].meta);
+    if (! entry.has_value())
+        return;
     lastSentRow = row;
-    onLoad (rows[static_cast<size_t> (row)].entry, loadBank);
+    onLoad (*entry, loadBank);
     updateStickyHeader();
 }
 
@@ -1142,7 +1166,7 @@ std::string PatchBrowser::tagAtCellPoint (int row, int width, int height, juce::
         return {};
     if (rows[static_cast<size_t> (row)].kind != BrowserRowKind::voice)
         return {};
-    const auto tags = tagsForDisplay (rows[static_cast<size_t> (row)].entry);
+    const auto tags = tagsForDisplay (rows[static_cast<size_t> (row)].meta);
     juce::Font font (juce::FontOptions (13.0f));
     const auto chips = layoutTagChips (tags, font, (float) width, (float) height);
     for (const auto& chip : chips)
@@ -1158,8 +1182,8 @@ void PatchBrowser::editTagsForRow (int row)
     if (rows[static_cast<size_t> (row)].kind != BrowserRowKind::voice)
         return;
 
-    const auto id = rows[static_cast<size_t> (row)].entry.contentId;
-    const auto name = toJuce (rows[static_cast<size_t> (row)].entry.voiceName);
+    const auto id = rows[static_cast<size_t> (row)].meta.contentId;
+    const auto name = toJuce (rows[static_cast<size_t> (row)].meta.voiceName);
     auto current = tagStore->getTags (id);
     const auto catalog = tagStore->allUniqueTags();
 
@@ -1380,7 +1404,7 @@ void PatchBrowser::showVoiceContextMenu (int row)
 
     juce::PopupMenu menu;
     menu.setLookAndFeel (&getLookAndFeel());
-    const auto entry = rows[static_cast<size_t> (row)].entry;
+    const auto& meta = rows[static_cast<size_t> (row)].meta;
     if (onAuditionVoice)
         menu.addItem (auditionVoice, "Audition");
     if (onAssignMorphCorner)
@@ -1395,12 +1419,12 @@ void PatchBrowser::showVoiceContextMenu (int row)
     if (onAuditionVoice || onAssignMorphCorner)
         menu.addSeparator();
     menu.addItem (editTags, "Edit tags");
-    const juce::File file (juce::String::fromUTF8 (entry.absolutePath.string().c_str()));
+    const juce::File file (juce::String::fromUTF8 (meta.absolutePath.string().c_str()));
     menu.addItem (openInFolder, "Open in folder", file.existsAsFile() || file.getParentDirectory().isDirectory());
 
     juce::Component::SafePointer<PatchBrowser> safe (this);
     menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition(),
-                        [safe, row, file, entry] (int result)
+                        [safe, row, file] (int result)
                         {
                             if (safe == nullptr)
                                 return;
@@ -1415,9 +1439,15 @@ void PatchBrowser::showVoiceContextMenu (int row)
                                     file.getParentDirectory().revealToUser();
                             }
                             else if (result == auditionVoice && safe->onAuditionVoice)
-                                safe->onAuditionVoice (entry);
+                            {
+                                if (auto entry = safe->resolveEntry (safe->rows[static_cast<size_t> (row)].meta))
+                                    safe->onAuditionVoice (*entry);
+                            }
                             else if (result >= setCornerA && result <= setCornerD && safe->onAssignMorphCorner)
-                                safe->onAssignMorphCorner (result - setCornerA, entry);
+                            {
+                                if (auto entry = safe->resolveEntry (safe->rows[static_cast<size_t> (row)].meta))
+                                    safe->onAssignMorphCorner (result - setCornerA, *entry);
+                            }
                         });
 }
 
@@ -1444,9 +1474,9 @@ void PatchBrowser::cellClicked (int row, int columnId, const juce::MouseEvent& e
 
     if (columnId == 1)
     {
-        const auto& entry = rows[static_cast<size_t> (row)].entry;
+        const auto& meta = rows[static_cast<size_t> (row)].meta;
         if (onFav)
-            onFav (entry.contentId);
+            onFav (meta.contentId);
         if (favOnly.getToggleState())
             rebuildFiltered();
         else
