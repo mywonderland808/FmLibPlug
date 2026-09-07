@@ -8,7 +8,9 @@ namespace fmlib
 {
 
 /**
- * TX7 machine / system parameters (g=4 param-change). Live-only; not part of FunctionBuffer.
+ * TX7 machine / system parameters (g=4 param-change).
+ * Get RX uses computeCommunication=0 dump (§4-4); Reset pushes Yamaha defaults
+ * without sending computeCommunication=0 (dump trigger).
  */
 class TxSystemPanel : public juce::Component,
                       private juce::Timer
@@ -21,6 +23,8 @@ public:
     void setMidi (MidiDeviceManager* midiManager);
     /** Keep Protect toggle in sync when Protect Off is sent from Globals strip. */
     void setMemoryProtectUi (bool on);
+    /** Apply a g=4 param received from the TX7 (Get RX dump). */
+    void applyRemoteParam (TxFunctionParam param, uint8_t value);
     StatusFn onStatus;
 
     void resized() override;
@@ -33,6 +37,13 @@ private:
     void queueNoteLimits();
     void flushQueuedNoteLimits();
     void setStatus (const juce::String& s);
+    Tx7System::State captureUiState() const;
+    void applyStateToUi (const Tx7System::State& state);
+    void requestGetRx();
+    void resetToYamahaDefaults();
+    void onDataEntryReceiveClicked();
+    void onDataEntryVolumeClicked();
+    void onComputeCommunicationClicked();
 
     MidiDeviceManager* midi = nullptr;
     bool suppress = false;
@@ -43,9 +54,12 @@ private:
     juce::Label title { {}, "Globals" };
     juce::Label hint {
         {},
-        "TX7 machine parameters (live g=4). Not part of Get Fn / Attenuator Apply."
+        "TX7 machine parameters (live g=4). Get RX dumps Combined/CC/Data Entry + performance "
+        "(not note limits/Protect/Load Function). Reset sends Yamaha power-on defaults."
     };
 
+    juce::TextButton getRxBtn { "Get RX" };
+    juce::TextButton resetBtn { "Reset" };
     juce::ToggleButton memoryProtect { "Memory Protect" };
     juce::TextButton protectOff { "Protect Off" };
 

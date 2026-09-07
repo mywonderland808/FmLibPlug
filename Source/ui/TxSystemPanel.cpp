@@ -13,9 +13,10 @@ TxSystemPanel::TxSystemPanel()
     switchesHeader.setFont (juce::FontOptions (14.0f, juce::Font::bold));
 
     for (auto* c : std::initializer_list<juce::Component*> {
-             &title, &hint, &memoryProtect, &protectOff, &limitsHeader, &noteLowLabel, &noteLow,
-             &noteHighLabel, &noteHigh, &switchesHeader, &dataEntryReceive, &controlChangeReceive,
-             &dataEntryVolume, &computeCommunication, &individualMode, &loadFunctionExt })
+             &title, &hint, &getRxBtn, &resetBtn, &memoryProtect, &protectOff, &limitsHeader,
+             &noteLowLabel, &noteLow, &noteHighLabel, &noteHigh, &switchesHeader, &dataEntryReceive,
+             &controlChangeReceive, &dataEntryVolume, &computeCommunication, &individualMode,
+             &loadFunctionExt })
         addAndMakeVisible (*c);
 
     auto setupSlider = [] (juce::Slider& s)
@@ -26,23 +27,37 @@ TxSystemPanel::TxSystemPanel()
     };
     setupSlider (noteLow);
     setupSlider (noteHigh);
-    noteLow.setValue (0.0, juce::dontSendNotification);
-    noteHigh.setValue (127.0, juce::dontSendNotification);
+    applyStateToUi (Tx7System::makeDefault());
 
+    getRxBtn.setTooltip (
+        "Send computeCommunication=0 so the TX7 dumps Combined / CC RX / Data Entry RX plus a "
+        "1-performance bulk. Needs MIDI out and device MIDI in. Does not return note limits, "
+        "Protect, or Load Function.");
+    resetBtn.setTooltip (
+        "Restore Yamaha machine defaults (Protect ON, notes C-2..G8, Combined, MIDI RX switches off, "
+        "Load Function INT) and send them. Does not send computeCommunication=0 (that would dump). "
+        "Bank writes need Protect Off afterward.");
     memoryProtect.setTooltip (
-        "When on, TX7 blocks writing voice/function memory (needs Off before bank write).");
+        "When on, TX7 blocks writing voice/function memory (needs Off before bank write). "
+        "Yamaha power-on default is ON.");
     protectOff.setTooltip ("Turn Memory Protect off (same helper as TX7 Globals strip).");
-    noteLow.setTooltip ("Lowest MIDI note the TX7 will play (0-127). Raised above High if needed.");
-    noteHigh.setTooltip ("Highest MIDI note the TX7 will play (0-127). Lowered below Low if needed.");
-    dataEntryReceive.setTooltip ("Allow the TX7 to receive data-entry / incremental SysEx edits.");
+    noteLow.setTooltip ("Lowest MIDI note the TX7 will play (0-127, factory C-2). Raised above High if needed.");
+    noteHigh.setTooltip ("Highest MIDI note the TX7 will play (0-127, factory G8). Lowered below Low if needed.");
+    dataEntryReceive.setTooltip (
+        "Allow data-entry / incremental SysEx edits. Mutually exclusive with Data entry volume.");
     controlChangeReceive.setTooltip ("Allow the TX7 to respond to MIDI Control Change messages.");
-    dataEntryVolume.setTooltip ("Route data-entry changes to volume when enabled.");
-    computeCommunication.setTooltip ("Enable TX7 compute / communication switch (panel MIDI link).");
+    dataEntryVolume.setTooltip (
+        "Route data-entry changes to volume. Mutually exclusive with Data entry RX.");
+    computeCommunication.setTooltip (
+        "On: TX7 also forces Combined + CC RX + Data Entry RX (Volume off). "
+        "Off: runs Get RX dump (same as Get RX button).");
     individualMode.setTooltip (
         "Off = Combined mode (DX+TX voice pairing). On = Independent voice selection.");
     loadFunctionExt.setTooltip (
         "Which function bank loads with a voice: off = internal (INT), on = external (EXT).");
 
+    getRxBtn.onClick = [this] { requestGetRx(); };
+    resetBtn.onClick = [this] { resetToYamahaDefaults(); };
     memoryProtect.onClick = [this]
     {
         if (suppress)
@@ -84,28 +99,25 @@ TxSystemPanel::TxSystemPanel()
         }
         queueNoteLimits();
     };
-    dataEntryReceive.onClick = [this]
-    {
-        sendBool (TxFunctionParam::dataEntryReceive, dataEntryReceive.getToggleState());
-    };
+    dataEntryReceive.onClick = [this] { onDataEntryReceiveClicked(); };
     controlChangeReceive.onClick = [this]
     {
+        if (suppress)
+            return;
         sendBool (TxFunctionParam::controlChangeReceive, controlChangeReceive.getToggleState());
     };
-    dataEntryVolume.onClick = [this]
-    {
-        sendBool (TxFunctionParam::dataEntryVolume, dataEntryVolume.getToggleState());
-    };
-    computeCommunication.onClick = [this]
-    {
-        sendBool (TxFunctionParam::computeCommunication, computeCommunication.getToggleState());
-    };
+    dataEntryVolume.onClick = [this] { onDataEntryVolumeClicked(); };
+    computeCommunication.onClick = [this] { onComputeCommunicationClicked(); };
     individualMode.onClick = [this]
     {
+        if (suppress)
+            return;
         sendBool (TxFunctionParam::combinedOrIndividual, individualMode.getToggleState());
     };
     loadFunctionExt.onClick = [this]
     {
+        if (suppress)
+            return;
         sendBool (TxFunctionParam::loadFunctionSelect, loadFunctionExt.getToggleState(), 127);
     };
 }
@@ -119,6 +131,131 @@ void TxSystemPanel::setMemoryProtectUi (bool on)
 {
     suppress = true;
     memoryProtect.setToggleState (on, juce::dontSendNotification);
+    suppress = false;
+}
+
+void TxSystemPanel::applyRemoteParam (TxFunctionParam param, uint8_t value)
+{
+    auto state = captureUiState();
+    Tx7System::applyParam (state, param, value);
+    applyStateToUi (state);
+}
+
+Tx7System::State TxSystemPanel::captureUiState() const
+{
+    Tx7System::State s;
+    s.dataEntryReceive = dataEntryReceive.getToggleState();
+    s.controlChangeReceive = controlChangeReceive.getToggleState();
+    s.dataEntryVolume = dataEntryVolume.getToggleState();
+    s.computeCommunication = computeCommunication.getToggleState();
+    s.individualMode = individualMode.getToggleState();
+    s.noteLimitLow = (uint8_t) noteLow.getValue();
+    s.noteLimitHigh = (uint8_t) noteHigh.getValue();
+    s.memoryProtect = memoryProtect.getToggleState();
+    s.loadFunctionExt = loadFunctionExt.getToggleState();
+    Tx7System::clampNoteLimits (s);
+    return s;
+}
+
+void TxSystemPanel::applyStateToUi (const Tx7System::State& state)
+{
+    auto s = state;
+    Tx7System::clampNoteLimits (s);
+    suppress = true;
+    dataEntryReceive.setToggleState (s.dataEntryReceive, juce::dontSendNotification);
+    controlChangeReceive.setToggleState (s.controlChangeReceive, juce::dontSendNotification);
+    dataEntryVolume.setToggleState (s.dataEntryVolume, juce::dontSendNotification);
+    computeCommunication.setToggleState (s.computeCommunication, juce::dontSendNotification);
+    individualMode.setToggleState (s.individualMode, juce::dontSendNotification);
+    noteLow.setValue ((double) s.noteLimitLow, juce::dontSendNotification);
+    noteHigh.setValue ((double) s.noteLimitHigh, juce::dontSendNotification);
+    memoryProtect.setToggleState (s.memoryProtect, juce::dontSendNotification);
+    loadFunctionExt.setToggleState (s.loadFunctionExt, juce::dontSendNotification);
+    lastSentNoteLow = s.noteLimitLow;
+    lastSentNoteHigh = s.noteLimitHigh;
+    suppress = false;
+}
+
+void TxSystemPanel::requestGetRx()
+{
+    flushQueuedNoteLimits();
+    if (midi == nullptr || ! midi->requestSystemGlobalsDump())
+        return; // status already set by manager
+    // Dump path forces computeCommunication off on the device.
+    suppress = true;
+    computeCommunication.setToggleState (false, juce::dontSendNotification);
+    suppress = false;
+}
+
+void TxSystemPanel::resetToYamahaDefaults()
+{
+    flushQueuedNoteLimits();
+    const auto defaults = Tx7System::makeDefault();
+    applyStateToUi (defaults);
+    if (midi == nullptr || ! midi->sendTxSystemState (defaults))
+    {
+        setStatus ("Yamaha system defaults applied locally (open MIDI out to send). Protect ON.");
+        return;
+    }
+    setStatus ("TX7 system defaults sent (Protect ON — use Protect Off before bank write)");
+}
+
+void TxSystemPanel::onDataEntryReceiveClicked()
+{
+    if (suppress)
+        return;
+    const bool on = dataEntryReceive.getToggleState();
+    if (on && dataEntryVolume.getToggleState())
+    {
+        suppress = true;
+        dataEntryVolume.setToggleState (false, juce::dontSendNotification);
+        suppress = false;
+        sendByte (TxFunctionParam::dataEntryVolume, 0);
+    }
+    sendBool (TxFunctionParam::dataEntryReceive, on);
+}
+
+void TxSystemPanel::onDataEntryVolumeClicked()
+{
+    if (suppress)
+        return;
+    const bool on = dataEntryVolume.getToggleState();
+    if (on && dataEntryReceive.getToggleState())
+    {
+        suppress = true;
+        dataEntryReceive.setToggleState (false, juce::dontSendNotification);
+        suppress = false;
+        sendByte (TxFunctionParam::dataEntryReceive, 0);
+    }
+    sendBool (TxFunctionParam::dataEntryVolume, on);
+}
+
+void TxSystemPanel::onComputeCommunicationClicked()
+{
+    if (suppress)
+        return;
+    if (computeCommunication.getToggleState())
+    {
+        // §4-4: ON forces Combined + CC RX + Data Entry RX; Volume off.
+        auto state = captureUiState();
+        Tx7System::applyComputeCommunicationOnEffects (state);
+        applyStateToUi (state);
+        if (midi != nullptr)
+            midi->sendTxSystemState (state); // includes computeCommunication=1
+        setStatus ("Compute Comm ON (forced Combined + CC RX + Data Entry RX)");
+        return;
+    }
+    // OFF is the dump trigger — same path as Get RX (only intentional dump sender).
+    if (midi == nullptr || ! midi->requestSystemGlobalsDump())
+    {
+        // Toggle already flipped Off; restore if we could not start the dump.
+        suppress = true;
+        computeCommunication.setToggleState (true, juce::dontSendNotification);
+        suppress = false;
+        return;
+    }
+    suppress = true;
+    computeCommunication.setToggleState (false, juce::dontSendNotification);
     suppress = false;
 }
 
@@ -181,12 +318,15 @@ void TxSystemPanel::resized()
     auto r = getLocalBounds().reduced (16);
     title.setBounds (r.removeFromTop (28));
     r.removeFromTop (4);
-    hint.setBounds (r.removeFromTop (40));
-    r.removeFromTop (12);
+    hint.setBounds (r.removeFromTop (48));
+    r.removeFromTop (8);
 
-    auto protectRow = r.removeFromTop (28);
-    memoryProtect.setBounds (protectRow.removeFromLeft (160));
-    protectOff.setBounds (protectRow.removeFromLeft (100).reduced (2));
+    auto toolRow = r.removeFromTop (28);
+    getRxBtn.setBounds (toolRow.removeFromLeft (72).reduced (1));
+    resetBtn.setBounds (toolRow.removeFromLeft (72).reduced (1));
+    toolRow.removeFromLeft (12);
+    memoryProtect.setBounds (toolRow.removeFromLeft (160));
+    protectOff.setBounds (toolRow.removeFromLeft (100).reduced (2));
     r.removeFromTop (16);
 
     limitsHeader.setBounds (r.removeFromTop (22));
