@@ -100,9 +100,13 @@ public:
     bool sendBank (const std::array<VoiceData, kBankVoiceCount>& bank);
     bool requestDump (bool bank32);
     bool requestFunctionDump();
+    /** TX7 §4-4: send computeCommunication=0 to dump Combined/CC/DataEntry + 1-performance. */
+    bool requestSystemGlobalsDump();
     bool sendPerformanceBulk (const Tx7PerformanceData& data, bool pace = true);
     bool sendDxFunctionParam (DxFunctionParam param, uint8_t value);
     bool sendTxFunctionParam (TxFunctionParam param, uint8_t value);
+    /** Push a full machine (g=4) state to the TX7. */
+    bool sendTxSystemState (const Tx7System::State& state);
     bool sendNoteOn (int note, int velocity);
     bool sendNoteOff (int note);
 
@@ -116,14 +120,14 @@ public:
     juce::String getInputName() const { return inputName; }
     juce::String getControllerInputName() const { return controllerInputName; }
     juce::String getOutputName() const { return outputName; }
-
+    bool hasDeviceInput() const;
+    bool hasOutput() const;
 
 private:
     void handleIncomingMidiMessage (juce::MidiInput*, const juce::MidiMessage& message) override;
     void timerCallback() override;
     void setStatus (const juce::String& s);
     void ensureBackgroundThread();
-    bool hasOutput() const;
     bool sendMessagesScheduled (const std::vector<std::vector<uint8_t>>& messages, int spacingMs);
     bool sendMessageNowLocked (const juce::MidiMessage& message);
     void enqueueHostOutput (const juce::MidiMessage& message, double dueMs = 0.0);

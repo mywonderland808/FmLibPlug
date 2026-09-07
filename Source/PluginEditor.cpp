@@ -85,6 +85,12 @@ FmLibPlugAudioProcessorEditor::FmLibPlugAudioProcessorEditor (FmLibPlugAudioProc
         if (safe != nullptr)
             safe->globalsPanel.refreshFromBuffer();
     });
+    plugin.setTxSystemParamCallback ([safe = juce::Component::SafePointer<FmLibPlugAudioProcessorEditor> (this)]
+                                         (fmlib::TxFunctionParam param, uint8_t value)
+    {
+        if (safe != nullptr)
+            safe->txSystem.applyRemoteParam (param, value);
+    });
     txSystem.setMidi (&plugin.midi);
     txSystem.onStatus = [this] (const juce::String& s) { setMidiStatus (s); };
     morpher.setPresetStore (&plugin.morphPresets);

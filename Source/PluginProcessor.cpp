@@ -1211,12 +1211,20 @@ void FmLibPlugAudioProcessor::autoTagLibrary (std::function<void()> onDone)
 
 void FmLibPlugAudioProcessor::handleIncomingSysex (const std::vector<uint8_t>& bytes)
 {
+    if (auto txParam = fmlib::Tx7System::parseTxFunctionParamChange (bytes))
+    {
+        if (txSystemParamReceived)
+            txSystemParamReceived (txParam->first, txParam->second);
+        // Quiet: Get RX may emit several g=4 params; performance bulk sets final status.
+        return;
+    }
+
     if (fmlib::Tx7Performance::looksLikePerformanceBulk (bytes.data(), bytes.size()))
     {
         if (auto perf = fmlib::Tx7Performance::parsePerformanceBulk (bytes))
         {
             functionBuffer.setFromDevice (std::move (*perf));
-            midi.reportStatus ("Received TX7 function / performance");
+            midi.reportStatus ("Received TX7 performance (Get RX / Get Fn); note limits/Protect not in dump");
             if (functionBufferChanged)
                 functionBufferChanged();
         }

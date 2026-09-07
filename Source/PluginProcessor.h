@@ -77,6 +77,11 @@ public:
     void sendMemoryProtectOff();
     /** Notify UI that FunctionBuffer changed (Get or live edit). */
     void setFunctionBufferChangedCallback (std::function<void()> fn) { functionBufferChanged = std::move (fn); }
+    /** Notify UI of a received TX g=4 param (system Read dump). */
+    void setTxSystemParamCallback (std::function<void(fmlib::TxFunctionParam, uint8_t)> fn)
+    {
+        txSystemParamReceived = std::move (fn);
+    }
     /** Update last edit-buffer snapshot without a SysEx send (morph stream). */
     void rememberEditBufferVoice (const fmlib::VoiceData& voice);
     /** Last voice sent to the edit buffer. */
@@ -221,6 +226,7 @@ private:
     std::set<int> controllerHeldNotes;
     std::function<void()> morphUiSync;
     std::function<void()> functionBufferChanged;
+    std::function<void(fmlib::TxFunctionParam, uint8_t)> txSystemParamReceived;
 
     int lastAuditionNote = -1;
     int pendingNote = -1;

@@ -380,6 +380,11 @@ bool MidiDeviceManager::hasOutput() const
     return output != nullptr || hostOutput;
 }
 
+bool MidiDeviceManager::hasDeviceInput() const
+{
+    return input != nullptr || hostDeviceInput;
+}
+
 void MidiDeviceManager::enqueueHostOutput (const juce::MidiMessage& message, double dueMs)
 {
     const juce::ScopedLock sl (hostOutLock);
@@ -752,6 +757,26 @@ bool MidiDeviceManager::requestFunctionDump()
     return ok;
 }
 
+bool MidiDeviceManager::requestSystemGlobalsDump()
+{
+    // TX7 MIDI impl. §4-4 *1: data 0 on computeCommunication dumps Combined / CC RX /
+    // Data Entry RX as param-changes plus a 1-performance bulk.
+    if (! hasOutput())
+    {
+        setStatus ("Open MIDI out to Get RX system globals");
+        return false;
+    }
+    if (! hasDeviceInput())
+    {
+        setStatus ("Open MIDI device in to receive Get RX dump");
+        return false;
+    }
+    const auto ok = sendTxFunctionParam (TxFunctionParam::computeCommunication, 0);
+    if (ok)
+        setStatus ("Get RX: waiting for Combined/CC/Data Entry (+ performance)...");
+    return ok;
+}
+
 bool MidiDeviceManager::sendPerformanceBulk (const Tx7PerformanceData& data, bool pace)
 {
     const auto ok = sendRaw (SysexMessages::makePerformanceBulk (data, channel), pace);
@@ -768,6 +793,27 @@ bool MidiDeviceManager::sendDxFunctionParam (DxFunctionParam param, uint8_t valu
 bool MidiDeviceManager::sendTxFunctionParam (TxFunctionParam param, uint8_t value)
 {
     return sendRaw (SysexMessages::makeTxFunctionParamChange (param, value, channel), false);
+}
+
+bool MidiDeviceManager::sendTxSystemState (const Tx7System::State& state)
+{
+    if (! hasOutput())
+    {
+        setStatus ("No MIDI output");
+        return false;
+    }
+    // encodeStateForSend omits computeCommunication=0 (dump trigger). Pace like bank writes.
+    const auto params = Tx7System::encodeStateForSend (state);
+    std::vector<std::vector<uint8_t>> msgs;
+    msgs.reserve (params.size());
+    for (const auto& [param, value] : params)
+        msgs.push_back (SysexMessages::makeTxFunctionParamChange (param, value, channel));
+    const int spacing = juce::jmax (1, pacingMs);
+    const auto ok = sendMessagesScheduled (msgs, spacing);
+    if (ok)
+        setStatus (state.memoryProtect ? "Sent TX7 system state (Protect ON)"
+                                       : "Sent TX7 system state (Protect Off)");
+    return ok;
 }
 
 bool MidiDeviceManager::sendNoteOn (int note, int velocity)
