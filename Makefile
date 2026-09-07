@@ -123,7 +123,12 @@ ensure-configure:
 			-DFMLIBPLUG_BUILD_TESTS=ON \
 			-DFMLIBPLUG_BUILD_CLAP=ON; \
 	else \
+		cache_bt=$$(sed -n 's/^CMAKE_BUILD_TYPE:STRING=//p' "$(BUILD_DIR)/CMakeCache.txt" | head -1); \
+		if [ "$$cache_bt" != "$(BUILD_TYPE)" ]; then \
+			echo "CMakeCache CMAKE_BUILD_TYPE='$$cache_bt' — reconfiguring to $(BUILD_TYPE) (artefacts under FmLibPlug_artefacts/$(BUILD_TYPE)/)..."; \
+		fi; \
 		$(CMAKE) -S . -B $(BUILD_DIR) \
+			-DCMAKE_BUILD_TYPE=$(BUILD_TYPE) \
 			-DFMLIBPLUG_BUILD_TESTS=ON \
 			-DFMLIBPLUG_BUILD_CLAP=ON >/dev/null; \
 	fi
