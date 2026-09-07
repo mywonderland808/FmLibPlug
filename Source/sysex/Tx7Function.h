@@ -5,6 +5,7 @@
 #include <array>
 #include <cstdint>
 #include <optional>
+#include <utility>
 #include <vector>
 
 namespace fmlib
@@ -42,13 +43,60 @@ enum class TxFunctionParam : uint8_t
     dataEntryReceive = 0,      // 0/1
     controlChangeReceive = 1,  // 0/1
     dataEntryVolume = 2,       // 0/1
-    computeCommunication = 3,  // 0/1
+    computeCommunication = 3,  // 0/1 — sending 0 dumps Combined/CC/DataEntry + 1-perf (§4-4 *1)
     combinedOrIndividual = 4,  // 0 = combined, 1 = individual
     noteLimitLow = 5,          // 0-127
     noteLimitHigh = 6,         // 0-127
     memoryProtect = 7,         // 0 = off, 127 = on
     loadFunctionSelect = 11,   // 0 = int, 127 = ext
 };
+
+/** Yamaha power-on / factory machine (g=4) defaults. */
+namespace Tx7System
+{
+struct State
+{
+    bool dataEntryReceive = false;
+    bool controlChangeReceive = false;
+    bool dataEntryVolume = false;
+    bool computeCommunication = false;
+    bool individualMode = false; // false = Combined
+    uint8_t noteLimitLow = 0;    // C-2
+    uint8_t noteLimitHigh = 127; // G8
+    bool memoryProtect = true;   // ON at power-on (owner / service manuals)
+    bool loadFunctionExt = false;
+};
+
+/** Factory / power-on machine defaults (note limits from Voice INIT table). */
+State makeDefault();
+
+/** Apply a received g=4 value into State (unknown params ignored). */
+void applyParam (State& s, TxFunctionParam param, uint8_t value);
+
+/** Ensure noteLimitLow <= noteLimitHigh. */
+void clampNoteLimits (State& s);
+
+/**
+ * Side effects when computeCommunication is turned ON (§4-4): Combined, CC RX,
+ * Data Entry RX on; Data Entry Volume off.
+ */
+void applyComputeCommunicationOnEffects (State& s);
+
+/**
+ * g=4 param/value pairs to send for State.
+ * Omits computeCommunication when false — sending 0 triggers a system dump (§4-4 *1).
+ */
+std::vector<std::pair<TxFunctionParam, uint8_t>> encodeStateForSend (const State& state);
+
+bool looksLikeTxFunctionParamChange (const uint8_t* data, size_t size);
+std::optional<std::pair<TxFunctionParam, uint8_t>> parseTxFunctionParamChange (const uint8_t* data,
+                                                                               size_t size);
+inline std::optional<std::pair<TxFunctionParam, uint8_t>>
+parseTxFunctionParamChange (const std::vector<uint8_t>& bytes)
+{
+    return parseTxFunctionParamChange (bytes.data(), bytes.size());
+}
+} // namespace Tx7System
 
 /** Yamaha parameter-change group byte: 0ggggghh (g = group, h = high bits / machine). */
 inline uint8_t yamahaParamGroupByte (uint8_t group, uint8_t h = 0)

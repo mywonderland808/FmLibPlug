@@ -179,6 +179,70 @@ TEST_CASE ("DX and TX function parameter-change group bytes", "[sysex][tx7][mess
     REQUIRE (fc[5] == 40);
 }
 
+TEST_CASE ("TX7 system defaults and param-change parse", "[sysex][tx7][system]")
+{
+    const auto d = Tx7System::makeDefault();
+    REQUIRE (d.memoryProtect);
+    REQUIRE (d.noteLimitLow == 0);
+    REQUIRE (d.noteLimitHigh == 127);
+    REQUIRE_FALSE (d.individualMode);
+    REQUIRE_FALSE (d.dataEntryReceive);
+    REQUIRE_FALSE (d.controlChangeReceive);
+    REQUIRE_FALSE (d.dataEntryVolume);
+    REQUIRE_FALSE (d.computeCommunication);
+    REQUIRE_FALSE (d.loadFunctionExt);
+
+    auto state = d;
+    Tx7System::applyParam (state, TxFunctionParam::memoryProtect, 0);
+    REQUIRE_FALSE (state.memoryProtect);
+    Tx7System::applyParam (state, TxFunctionParam::combinedOrIndividual, 1);
+    REQUIRE (state.individualMode);
+    Tx7System::applyParam (state, TxFunctionParam::noteLimitHigh, 60);
+    REQUIRE (state.noteLimitHigh == 60);
+    Tx7System::applyParam (state, TxFunctionParam::noteLimitLow, 90);
+    REQUIRE (state.noteLimitLow == 60); // clamped
+    REQUIRE (state.noteLimitHigh == 90);
+
+    Tx7System::applyComputeCommunicationOnEffects (state);
+    REQUIRE (state.computeCommunication);
+    REQUIRE_FALSE (state.individualMode);
+    REQUIRE (state.controlChangeReceive);
+    REQUIRE (state.dataEntryReceive);
+    REQUIRE_FALSE (state.dataEntryVolume);
+
+    const auto encodedOff = Tx7System::encodeStateForSend (Tx7System::makeDefault());
+    REQUIRE (encodedOff.size() == 8); // no computeCommunication=0 (dump trigger)
+    for (const auto& [p, v] : encodedOff)
+    {
+        REQUIRE (p != TxFunctionParam::computeCommunication);
+        (void) v;
+    }
+
+    auto onState = Tx7System::makeDefault();
+    Tx7System::applyComputeCommunicationOnEffects (onState);
+    const auto encodedOn = Tx7System::encodeStateForSend (onState);
+    REQUIRE (encodedOn.size() == 9);
+    bool sawComputeOn = false;
+    for (const auto& [p, v] : encodedOn)
+        if (p == TxFunctionParam::computeCommunication)
+        {
+            REQUIRE (v == 1);
+            sawComputeOn = true;
+        }
+    REQUIRE (sawComputeOn);
+
+    const auto msg = SysexMessages::makeTxFunctionParamChange (TxFunctionParam::controlChangeReceive, 1, 3);
+    REQUIRE (Tx7System::looksLikeTxFunctionParamChange (msg.data(), msg.size()));
+    auto parsed = Tx7System::parseTxFunctionParamChange (msg);
+    REQUIRE (parsed.has_value());
+    REQUIRE (parsed->first == TxFunctionParam::controlChangeReceive);
+    REQUIRE (parsed->second == 1);
+
+    auto junk = msg;
+    junk[3] = 0x08; // DX function group, not TX
+    REQUIRE_FALSE (Tx7System::parseTxFunctionParamChange (junk).has_value());
+}
+
 TEST_CASE ("FunctionBuffer blocks bulk send until device Get", "[sysex][tx7][function]")
 {
     FunctionBuffer buf;
