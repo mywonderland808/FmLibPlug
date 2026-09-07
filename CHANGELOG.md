@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.6] - 2026-09-07
+
+### Added
+- **Globals** page **Get RX** (TX7 `computeCommunication=0` dump of Combined/CC/Data Entry + performance) and **Reset** to Yamaha power-on machine defaults
+- Dump-safe `encodeStateForSend` (omits `computeCommunication=0`), note-limit clamp, and Compute Comm ON side-effect helpers with Catch2 coverage
+
+### Changed
+- System Reset paces g=4 writes and does not trigger an accidental Get RX dump
+- Get RX requires MIDI out and device MIDI in; Compute Comm Off uses the same dump path and restores the toggle if the dump cannot start
+- Data Entry RX and Data Entry Volume are mutually exclusive; Quiet status while multiple g=4 params arrive during Get RX
+
 ## [1.3.5] - 2026-08-21
 
 ### Added
