@@ -4,6 +4,8 @@ cmake-build-*/
 out/
 Dist/
 Builds/
+# CTest output when run from the source/build tree
+Testing/
 
 # JUCE / FetchContent
 _deps/
