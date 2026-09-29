@@ -250,6 +250,9 @@ FmLibPlugAudioProcessorEditor::FmLibPlugAudioProcessorEditor (FmLibPlugAudioProc
     morpher.onMorph = [this] (const fmlib::VoiceData& v, bool dragEmit, bool liveAllParams)
     {
         juce::ignoreUnused (v);
+        // Sync locks before morph so Reset / Restore default / chip toggles do not
+        // emit one frame with the previous lock mask.
+        plugin.setLiveLockGroups (morpher.getLockGroups());
         if (liveAllParams)
             plugin.midi.cancelMorphReleaseGuard();
         // Lock / lock-ref / corner emits: params only - never commit ABCD-XX:YY.

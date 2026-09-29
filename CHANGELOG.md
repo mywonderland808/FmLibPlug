@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Morph **Reset** clears all lock groups; **Restore default** applies the fixed wavetable-like factory set (EG, Levels, Algorithm, Coarse, Key sync, Transpose, LFO, AMS/Vel). Fine and Feedback stay free to morph
+- `morphLockSchema` 3 one-shot migrates older prefs to that factory set (custom schema-2 lock choices are replaced on load)
+- Morph pad hint notes that right-drag lock-ref only affects sound when locks are on
+- Morph LCD name updates on pad commit / host pad automation only (frozen during Edge LFO and Note morph)
+- Globals page and TX7 Globals strip use short ASCII labels; longer Get RX / Get Fn detail lives in tooltips and status stays brief
+
+### Fixed
+- Lock chip / Reset / Restore default now sync processor lock groups before the morph MIDI emit (no one-frame stale mask)
+
 ## [1.3.6] - 2026-09-07
 
 ### Added
@@ -132,8 +142,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Note morph Random/Edges jumps on the first key of a phrase, then delays note-on until SysEx lead-in finishes (audition uses the same lead-in); later chord tones stay polyphonic on that voice
 - Morph egress respects **Morph release hold**; note jump and direct pad gestures cancel it
 - Minimum editor height raised to 850 px for the Settings checklist
-- Morph **Clear** clears corner voices only; **Reset** restores locks and lock reference
-- Factory morph locks are **EG + Levels** (`morphLockSchema` 2); Freq lock split into **Coarse** and **Fine**
+- Morph **Clear** clears corner voices only; **Reset** clears lock groups; **Restore default** applies factory locks
+- Factory morph locks are the wavetable-like set (`morphLockSchema` 3); Freq lock split into **Coarse** and **Fine**
 - Voice morph uses nearest-neighbour for discrete VCED fields plus a silence guard on operator levels
 - Full morph voice dumps only when idle (or no baseline); while notes sound, budgeted parameter changes follow the stream mode
 - Morph live param-diffs skip voice-name bytes; name is sent via full dump when pad drag ends

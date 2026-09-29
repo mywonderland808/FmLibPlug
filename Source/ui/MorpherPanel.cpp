@@ -382,9 +382,10 @@ void MorpherPanel::applyLockChipToggles()
     if (lockTranspose.getToggleState()) g |= morphLockTranspose;
     lockGroups = g;
     lastSentVoice.reset();
-    emitMorph (false, true);
+    // Prefs / processor lock sync before emit (onMorph also syncs; order kept explicit here).
     if (onMorphUiPrefsChanged)
         onMorphUiPrefsChanged();
+    emitMorph (false, true);
 }
 
 void MorpherPanel::clearLocks()
@@ -392,9 +393,9 @@ void MorpherPanel::clearLocks()
     lockGroups = morphLockNone;
     syncLockChipsFromFlags();
     lastSentVoice.reset();
-    emitMorph (false, true);
     if (onMorphUiPrefsChanged)
         onMorphUiPrefsChanged();
+    emitMorph (false, true);
     if (onStatus)
         onStatus ("Locks cleared");
     repaint();
@@ -405,9 +406,9 @@ void MorpherPanel::restoreFactoryLocks()
     lockGroups = morphLockFactoryDefaults;
     syncLockChipsFromFlags();
     lastSentVoice.reset();
-    emitMorph (false, true);
     if (onMorphUiPrefsChanged)
         onMorphUiPrefsChanged();
+    emitMorph (false, true);
     if (onStatus)
         onStatus ("Locks restored to factory default");
     repaint();
