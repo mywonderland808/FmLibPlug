@@ -150,7 +150,7 @@ private:
     juce::ToggleButton applyWithLoad { "Apply with voice load" };
     juce::Label syncHint {
         {},
-        "Get Fn before Apply (attenuator) or apply-with-load."
+        "Get Fn before Apply (attenuator)."
     };
 
     juce::Viewport sheetViewport;

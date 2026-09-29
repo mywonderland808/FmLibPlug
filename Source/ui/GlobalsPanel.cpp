@@ -68,8 +68,11 @@ GlobalsPanel::SheetContent::SheetContent (GlobalsPanel& o)
     pbRange.setTooltip ("Pitch bend wheel range in semitones (0-12).");
     pbStep.setTooltip ("Pitch bend step size in semitones (0 = continuous glide).");
     attenuator.setTooltip (
-        "Voice-A output level (0 = quietest / max atten, 7 = loudest / min atten). Needs Get Fn, then Apply (bulk).");
-    applyAtten.setTooltip ("Send the Get Fn performance bulk so the attenuator value reaches the TX7.");
+        "Voice-A output level (0 = quietest / max atten, 7 = loudest / min atten). "
+        "Local until Apply - needs Get Fn (or Globals Get RX), then Apply (bulk). No live g=2 path.");
+    applyAtten.setTooltip (
+        "Send the performance bulk so attenuator reaches the TX7. "
+        "Needs a prior Get Fn or Get RX dump.");
     mw.sens.setTooltip (
         "Modulation wheel depth (0-15). Pitch/amp need non-zero PMS/AMS in the voice data.");
     fc.sens.setTooltip (
@@ -207,14 +210,19 @@ GlobalsPanel::GlobalsPanel()
     sheetViewport.setViewedComponent (&sheet, false);
     sheetViewport.setScrollBarsShown (true, false);
 
-    getFn.setTooltip ("Request the TX7 Voice-A function / 1-performance edit buffer (SysEx format 0x01).");
+    getFn.setTooltip (
+        "Request Voice-A function / 1-performance buffer (format 0x01). "
+        "Unlike Globals Get RX, does not force Compute Comm Off or dump machine RX switches.");
     resetFn.setTooltip (
-        "Restore Yamaha factory Voice-A function defaults (poly, PB 7, MW 8+pitch, FC/AT 8, BC 15, atten 7). "
-        "Live params send immediately; Atten needs Apply after Get.");
-    protectOff.setTooltip ("Turn TX7 Memory Protect off so bank writes are allowed.");
+        "Restore Yamaha Voice-A defaults (poly, PB 7, MW 8+pitch, FC/AT 8, BC 15, atten 7). "
+        "Play/PB/controllers send live; Atten needs Apply after Get.");
+    protectOff.setTooltip (
+        "Turn TX7 Memory Protect off so bank writes are allowed. Not audible by itself.");
     applyWithLoad.setTooltip (
-        "After a voice or bank load, also send the Get Fn bulk if you edited globals since Get/Apply (default off).");
-    title.setTooltip ("Drag the top edge of this panel to resize.");
+        "After voice/bank load, also send the performance bulk if globals were edited (default off).");
+    title.setTooltip (
+        "Voice-A play / PB / controllers (live g=2) and attenuator (bulk Apply). "
+        "Drag the top edge to resize. Machine MIDI switches are on the Globals page.");
 
     getFn.onClick = [this]
     {
@@ -300,8 +308,8 @@ void GlobalsPanel::refreshFromBuffer()
     updateAttenApplyEnabled();
     syncHint.setVisible (! synced);
     applyWithLoad.setTooltip (
-        synced ? "After a voice or bank load, also send the Get Fn bulk if you edited globals since Get/Apply."
-               : "Get Fn from the TX7 first - apply-with-load will not send until then.");
+        synced ? "After voice/bank load, also send the performance bulk if globals were edited."
+               : "Get Fn (or Globals Get RX) first - apply-with-load will not send until then.");
     if (wasHint != syncHint.isVisible())
         resized();
     repaint();

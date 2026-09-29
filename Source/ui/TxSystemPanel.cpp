@@ -30,31 +30,35 @@ TxSystemPanel::TxSystemPanel()
     applyStateToUi (Tx7System::makeDefault());
 
     getRxBtn.setTooltip (
-        "Send computeCommunication=0 so the TX7 dumps Combined / CC RX / Data Entry RX plus a "
-        "1-performance bulk. Needs MIDI out and device MIDI in. Does not return note limits, "
-        "Protect, or Load Function.");
+        "Dumps Combined / CC RX / Data Entry plus a 1-performance bulk (computeCommunication=0). "
+        "Forces Compute Comm Off; Combined/pairing can change the sound. Refreshes Device TX7 Globals. "
+        "Does not return note limits, Protect, or Load Function. Prefer Get Fn for performance only.");
     resetBtn.setTooltip (
-        "Restore Yamaha machine defaults (Protect ON, notes C-2..G8, Combined, MIDI RX switches off, "
+        "Restore Yamaha machine defaults (Protect ON, notes C-2..G8, Combined, MIDI RX off, "
         "Load Function INT) and send them. Does not send computeCommunication=0 (that would dump). "
         "Bank writes need Protect Off afterward.");
     memoryProtect.setTooltip (
         "When on, TX7 blocks writing voice/function memory (needs Off before bank write). "
-        "Yamaha power-on default is ON.");
-    protectOff.setTooltip ("Turn Memory Protect off (same helper as TX7 Globals strip).");
+        "Not audible by itself. Yamaha power-on default is ON.");
+    protectOff.setTooltip ("Turn Memory Protect off (same helper as TX7 Globals strip). Not audible by itself.");
     noteLow.setTooltip ("Lowest MIDI note the TX7 will play (0-127, factory C-2). Raised above High if needed.");
     noteHigh.setTooltip ("Highest MIDI note the TX7 will play (0-127, factory G8). Lowered below Low if needed.");
     dataEntryReceive.setTooltip (
-        "Allow data-entry / incremental SysEx edits. Mutually exclusive with Data entry volume.");
-    controlChangeReceive.setTooltip ("Allow the TX7 to respond to MIDI Control Change messages.");
+        "Allow data-entry / incremental SysEx edits. Mutually exclusive with Data entry volume. "
+        "Gates MIDI editing - not an audible voice change by itself.");
+    controlChangeReceive.setTooltip (
+        "Allow the TX7 to respond to MIDI Control Change messages. Gates MIDI - not audible alone.");
     dataEntryVolume.setTooltip (
-        "Route data-entry changes to volume. Mutually exclusive with Data entry RX.");
+        "Route data-entry changes to volume. Mutually exclusive with Data entry RX. Gates editing path.");
     computeCommunication.setTooltip (
-        "On: TX7 also forces Combined + CC RX + Data Entry RX (Volume off). "
-        "Off: runs Get RX dump (same as Get RX button).");
+        "On: forces Combined + CC RX + Data Entry RX (Volume off); pairing can change the sound. "
+        "Off: same as Get RX (Compute Comm Off + performance dump).");
     individualMode.setTooltip (
-        "Off = Combined mode (DX+TX voice pairing). On = Independent voice selection.");
+        "Off = Combined mode (DX+TX voice pairing - can change the sound). "
+        "On = Independent voice selection.");
     loadFunctionExt.setTooltip (
-        "Which function bank loads with a voice: off = internal (INT), on = external (EXT).");
+        "Which function bank loads with a voice: off = internal (INT), on = external (EXT). "
+        "Takes effect on voice load - not audible until then.");
 
     getRxBtn.onClick = [this] { requestGetRx(); };
     resetBtn.onClick = [this] { resetToYamahaDefaults(); };
@@ -197,7 +201,7 @@ void TxSystemPanel::resetToYamahaDefaults()
         setStatus ("Yamaha system defaults applied locally (open MIDI out to send). Protect ON.");
         return;
     }
-    setStatus ("TX7 system defaults sent (Protect ON — use Protect Off before bank write)");
+    setStatus ("TX7 system defaults sent (Protect ON - use Protect Off before bank write)");
 }
 
 void TxSystemPanel::onDataEntryReceiveClicked()
@@ -318,7 +322,7 @@ void TxSystemPanel::resized()
     auto r = getLocalBounds().reduced (16);
     title.setBounds (r.removeFromTop (28));
     r.removeFromTop (4);
-    hint.setBounds (r.removeFromTop (48));
+    hint.setBounds (r.removeFromTop (28));
     r.removeFromTop (8);
 
     auto toolRow = r.removeFromTop (28);

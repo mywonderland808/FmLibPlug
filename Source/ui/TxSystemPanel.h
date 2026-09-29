@@ -54,8 +54,7 @@ private:
     juce::Label title { {}, "Globals" };
     juce::Label hint {
         {},
-        "TX7 machine parameters (live g=4). Get RX dumps Combined/CC/Data Entry + performance "
-        "(not note limits/Protect/Load Function). Reset sends Yamaha power-on defaults."
+        "TX7 machine parameters (MIDI / Protect / note limits). Hover controls for details."
     };
 
     juce::TextButton getRxBtn { "Get RX" };

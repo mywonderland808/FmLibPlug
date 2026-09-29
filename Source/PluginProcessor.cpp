@@ -1248,7 +1248,7 @@ void FmLibPlugAudioProcessor::handleIncomingSysex (const std::vector<uint8_t>& b
         if (auto perf = fmlib::Tx7Performance::parsePerformanceBulk (bytes))
         {
             functionBuffer.setFromDevice (std::move (*perf));
-            midi.reportStatus ("Received TX7 performance (Get RX / Get Fn); note limits/Protect not in dump");
+            midi.reportStatus ("Received TX7 performance (Get Fn / Get RX)");
             if (functionBufferChanged)
                 functionBufferChanged();
         }

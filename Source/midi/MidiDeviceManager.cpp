@@ -819,7 +819,7 @@ bool MidiDeviceManager::requestSystemGlobalsDump()
     }
     const auto ok = sendTxFunctionParam (TxFunctionParam::computeCommunication, 0);
     if (ok)
-        setStatus ("Get RX: waiting for Combined/CC/Data Entry (+ performance)...");
+        setStatus ("Get RX: waiting for dump...");
     return ok;
 }
 

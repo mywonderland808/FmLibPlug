@@ -72,7 +72,7 @@ FmLibPlugAudioProcessorEditor::FmLibPlugAudioProcessorEditor (FmLibPlugAudioProc
         if (plugin.sendFunctionBuffer())
             setMidiStatus ("Applied TX7 performance bulk (attenuator)");
         else
-            setMidiStatus ("Get Fn from the TX7 before Apply (avoids wiping function memory)");
+            setMidiStatus ("Get Fn before Apply");
     };
     globalsPanel.onProtectOff = [this]
     {
