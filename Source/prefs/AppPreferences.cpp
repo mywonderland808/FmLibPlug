@@ -50,9 +50,9 @@ void AppPreferences::loadFromFile (const juce::File& f)
         morphNoteSettleMs = juce::jlimit (0, 100, xml->getIntAttribute ("morphNoteSettleMs", 40));
 
         const int lockSchema = xml->getIntAttribute ("morphLockSchema", 0);
-        if (lockSchema < 2)
+        if (lockSchema < 3)
         {
-            // One-shot product migration: schemas 0 and 1 both adopt the EG+Levels
+            // One-shot product migration: schemas 0-2 adopt the wavetable-like
             // factory set, so whatever they saved is deliberately discarded.
             morphLockGroups = morphLockFactoryDefaults;
         }
@@ -142,7 +142,7 @@ void AppPreferences::saveToFile (const juce::File& f) const
     xml->setAttribute ("morphEmitMs", morphEmitMs);
     xml->setAttribute ("morphReleaseGuardMs", morphReleaseGuardMs);
     xml->setAttribute ("morphNoteSettleMs", morphNoteSettleMs);
-    xml->setAttribute ("morphLockSchema", 2);
+    xml->setAttribute ("morphLockSchema", 3);
     xml->setAttribute ("morphLockGroups", (int) morphLockGroups);
     xml->setAttribute ("morphLockRefX", (double) morphLockRefX);
     xml->setAttribute ("morphLockRefY", (double) morphLockRefY);

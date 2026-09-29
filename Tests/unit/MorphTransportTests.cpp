@@ -256,9 +256,21 @@ TEST_CASE ("VoiceMorpher silence guard lifts a carrier level", "[sysex][morph]")
     REQUIRE (dead[16] > 0);
 }
 
-TEST_CASE ("morphLockFactoryDefaults is EG+Levels", "[sysex][morph][locks]")
+TEST_CASE ("morphLockFactoryDefaults is wavetable-like set", "[sysex][morph][locks]")
 {
     REQUIRE ((morphLockFactoryDefaults & morphLockEg) != 0);
     REQUIRE ((morphLockFactoryDefaults & morphLockLevels) != 0);
-    REQUIRE ((morphLockFactoryDefaults & morphLockAlgo) == 0);
+    REQUIRE ((morphLockFactoryDefaults & morphLockAlgo) != 0);
+    REQUIRE ((morphLockFactoryDefaults & morphLockFreqCoarse) != 0);
+    REQUIRE ((morphLockFactoryDefaults & morphLockOscSync) != 0);
+    REQUIRE ((morphLockFactoryDefaults & morphLockTranspose) != 0);
+    REQUIRE ((morphLockFactoryDefaults & morphLockLfo) != 0);
+    REQUIRE ((morphLockFactoryDefaults & morphLockSens) != 0);
+    REQUIRE ((morphLockFactoryDefaults & morphLockFreqFine) == 0);
+    REQUIRE ((morphLockFactoryDefaults & morphLockFeedback) == 0);
+    REQUIRE ((morphLockFactoryDefaults & morphLockPitchEg) == 0);
+    REQUIRE ((morphLockFactoryDefaults & morphLockScaling) == 0);
+    // Reset / Restore default semantics (pure group targets).
+    REQUIRE (morphLockNone == 0);
+    REQUIRE ((morphLockFactoryDefaults & morphLockAllGroups) == morphLockFactoryDefaults);
 }

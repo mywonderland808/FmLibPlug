@@ -94,9 +94,7 @@ FmLibPlugAudioProcessorEditor::FmLibPlugAudioProcessorEditor (FmLibPlugAudioProc
     txSystem.setMidi (&plugin.midi);
     txSystem.onStatus = [this] (const juce::String& s) { setMidiStatus (s); };
     morpher.setPresetStore (&plugin.morphPresets);
-    morpher.setDefaultLockGroups (plugin.prefs.morphLockGroups);
     morpher.setLockGroups (plugin.prefs.morphLockGroups);
-    morpher.setDefaultLockRefPosition (plugin.prefs.morphLockRefX, plugin.prefs.morphLockRefY);
     morpher.setLockRefPosition (plugin.prefs.morphLockRefX, plugin.prefs.morphLockRefY);
 
     if (plugin.allLiveCornersReady())
@@ -254,7 +252,7 @@ FmLibPlugAudioProcessorEditor::FmLibPlugAudioProcessorEditor (FmLibPlugAudioProc
         juce::ignoreUnused (v);
         if (liveAllParams)
             plugin.midi.cancelMorphReleaseGuard();
-        // Lock / lock-ref / corner emits: params only — never commit ABCD-XX:YY.
+        // Lock / lock-ref / corner emits: params only - never commit ABCD-XX:YY.
         plugin.applyLiveMorph (dragEmit, liveAllParams, false);
     };
     // Driving the pad by hand outranks the release hold: a click you asked for beats a
@@ -268,10 +266,10 @@ FmLibPlugAudioProcessorEditor::FmLibPlugAudioProcessorEditor (FmLibPlugAudioProc
     morpher.onPresetsChanged = [this] { plugin.persistMorphPresets(); };
     morpher.onMorphUiPrefsChanged = [this]
     {
-        // Persist LFO / note-jump and lock *defaults* (Set default updates those).
-        plugin.prefs.morphLockGroups = morpher.getDefaultLockGroups();
-        plugin.prefs.morphLockRefX = morpher.getDefaultLockRefX();
-        plugin.prefs.morphLockRefY = morpher.getDefaultLockRefY();
+        // Persist LFO / note-jump and current locks / lock-ref.
+        plugin.prefs.morphLockGroups = morpher.getLockGroups();
+        plugin.prefs.morphLockRefX = morpher.getLockRefX();
+        plugin.prefs.morphLockRefY = morpher.getLockRefY();
         const auto mapping = fmlib::morphMotionFromChoice (plugin.getMorphMotionChoice());
         plugin.prefs.morphLfoEnabled = mapping.lfoEnabled;
         plugin.prefs.morphNoteJumpMode = mapping.noteJumpMode;

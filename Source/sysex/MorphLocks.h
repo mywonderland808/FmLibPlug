@@ -34,11 +34,12 @@ inline constexpr uint32_t morphLockAllGroups = morphLockEg | morphLockLevels | m
                                             | morphLockFeedback | morphLockOscSync | morphLockFreqFine;
 
 /**
- * Factory defaults: keep envelope + levels at the lock reference so a morph
- * cannot go dead; structural/freq params stay morphable. Clicks from those are
- * limited by the active MorphStreamMode, not by locking.
+ * Factory defaults for a wavetable-like pad scan: freeze identity / discrete jumps
+ * and articulation; leave Fine + Feedback (and Pitch EG / Scaling) free to morph.
  */
-inline constexpr uint32_t morphLockFactoryDefaults = morphLockEg | morphLockLevels;
+inline constexpr uint32_t morphLockFactoryDefaults = morphLockEg | morphLockLevels | morphLockAlgo
+                                                   | morphLockFreqCoarse | morphLockOscSync
+                                                   | morphLockTranspose | morphLockLfo | morphLockSens;
 
 std::bitset<kVoiceDataBytes> morphLockMask (uint32_t groups);
 

@@ -69,7 +69,7 @@ TEST_CASE ("AppPreferences saveToFile loadFromFile round-trip", "[prefs]")
     REQUIRE (loaded.morphReleaseGuardMs == 600);
     REQUIRE (loaded.morphNoteSettleMs == 75);
     REQUIRE (loaded.morphLockGroups == 5);
-    // Round-trip writes morphLockSchema=2 so factory migration does not overwrite saved locks.
+    // Round-trip writes morphLockSchema=3 so factory migration does not overwrite saved locks.
     REQUIRE (loaded.morphLockRefX == Catch::Approx (0.3f));
     REQUIRE (loaded.morphLockRefY == Catch::Approx (0.7f));
     REQUIRE (loaded.morphLfoEnabled);
@@ -93,7 +93,7 @@ TEST_CASE ("AppPreferences saveToFile loadFromFile round-trip", "[prefs]")
     dir.deleteRecursively();
 }
 
-TEST_CASE ("AppPreferences migrates pre-schema lock defaults to EG+Levels factory set", "[prefs]")
+TEST_CASE ("AppPreferences migrates pre-schema lock defaults to factory set", "[prefs]")
 {
     const auto dir = juce::File::getSpecialLocation (juce::File::tempDirectory)
                          .getChildFile ("FmLibPlugPrefsMigrate")
@@ -109,7 +109,7 @@ TEST_CASE ("AppPreferences migrates pre-schema lock defaults to EG+Levels factor
     dir.deleteRecursively();
 }
 
-TEST_CASE ("AppPreferences schema1 migrates to EG+Levels factory", "[prefs]")
+TEST_CASE ("AppPreferences schema1 migrates to factory lock set", "[prefs]")
 {
     const auto dir = juce::File::getSpecialLocation (juce::File::tempDirectory)
                          .getChildFile ("FmLibPlugPrefsSchema1")
@@ -118,6 +118,24 @@ TEST_CASE ("AppPreferences schema1 migrates to EG+Levels factory", "[prefs]")
     const auto file = dir.getChildFile ("settings.xml");
     file.replaceWithText (
         "<?xml version=\"1.0\"?><FmLibPlugSettings morphLockSchema=\"1\" morphLockGroups=\"4\"/>");
+
+    AppPreferences loaded;
+    loaded.loadFromFile (file);
+    REQUIRE (loaded.morphLockGroups == morphLockFactoryDefaults);
+
+    dir.deleteRecursively();
+}
+
+TEST_CASE ("AppPreferences schema2 migrates to wavetable factory lock set", "[prefs]")
+{
+    const auto dir = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                         .getChildFile ("FmLibPlugPrefsSchema2")
+                         .getNonexistentChildFile ("run", "");
+    dir.createDirectory();
+    const auto file = dir.getChildFile ("settings.xml");
+    // Schema 2 could have saved EG+Levels only (bit 0|1 = 3).
+    file.replaceWithText (
+        "<?xml version=\"1.0\"?><FmLibPlugSettings morphLockSchema=\"2\" morphLockGroups=\"3\"/>");
 
     AppPreferences loaded;
     loaded.loadFromFile (file);

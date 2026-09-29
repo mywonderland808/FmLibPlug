@@ -52,7 +52,7 @@ MorpherPanel::MorpherPanel()
     wireAssign (assignB, 1);
     wireAssign (assignC, 2);
     wireAssign (assignD, 3);
-    clearBtn.setTooltip ("Clear the four corner voices (A-D). Locks and lock reference stay; use Reset for those.");
+    clearBtn.setTooltip ("Clear the four corner voices (A-D). Locks and lock reference stay; use Reset to clear locks.");
     clearBtn.onClick = [this] { clearCorners(); };
     addAndMakeVisible (clearBtn);
 
@@ -63,9 +63,9 @@ MorpherPanel::MorpherPanel()
     locksLabel.setJustificationType (juce::Justification::centredLeft);
     locksLabel.setFont (juce::FontOptions (12.0f));
     locksLabel.setTooltip (
-        "Locked groups are taken from the hollow lock-reference marker (right-drag on the pad), "
-        "not from the main morph marker. Moving Ref changes those parameters; MIDI is sent on the "
-        "next pad click/drag even if the main marker did not move.");
+        "Locked groups stay at the hollow lock-reference marker (right-drag on the pad). "
+        "With no locks on, right-drag only moves the marker and does not change the sound. "
+        "Moving Ref updates locked parameters; MIDI is sent on release (including held notes).");
     addAndMakeVisible (locksLabel);
 
     auto wireLock = [this] (juce::ToggleButton& b, const juce::String& tip)
@@ -88,12 +88,14 @@ MorpherPanel::MorpherPanel()
     wireLock (lockSens, "Lock AMS and key-velocity sensitivity to the lock-reference point");
     wireLock (lockTranspose, "Lock transpose to the lock-reference point");
 
-    resetLocksBtn.setTooltip ("Restore lock groups and lock reference to the saved defaults (Set default)");
-    resetLocksBtn.onClick = [this] { resetLocksToDefaults(); };
+    resetLocksBtn.setTooltip ("Clear all lock groups. Lock-reference position is unchanged. Right-drag only affects sound when locks are on.");
+    resetLocksBtn.onClick = [this] { clearLocks(); };
     addAndMakeVisible (resetLocksBtn);
-    setDefaultLocksBtn.setTooltip ("Save current locks and lock-reference as defaults (used by Reset)");
-    setDefaultLocksBtn.onClick = [this] { saveLocksAsDefaults(); };
-    addAndMakeVisible (setDefaultLocksBtn);
+    restoreDefaultLocksBtn.setTooltip (
+        "Restore the factory wavetable-like lock set (EG, Levels, Algorithm, Coarse, Key sync, "
+        "Transpose, LFO, AMS/Vel). Lock-reference position is unchanged.");
+    restoreDefaultLocksBtn.onClick = [this] { restoreFactoryLocks(); };
+    addAndMakeVisible (restoreDefaultLocksBtn);
 
     lfoToggle.setClickingTogglesState (true);
     lfoToggle.setTooltip ("Walk the pad edges (A-B-D-C) continuously. Turns off Note morph when enabled. While on, left-click does not move the marker; right-drag still sets lock ref.");
@@ -264,11 +266,6 @@ void MorpherPanel::setLockGroups (uint32_t groups)
     repaint();
 }
 
-void MorpherPanel::setDefaultLockGroups (uint32_t groups)
-{
-    defaultLockGroups = groups & morphLockAllGroups;
-}
-
 void MorpherPanel::setLockRefPosition (float x, float y)
 {
     lockRefX = juce::jlimit (0.0f, 1.0f, x);
@@ -291,12 +288,6 @@ void MorpherPanel::resumeEgressIfPaused()
         onPadGestureStarted();
     else
         setEgressPaused (false);
-}
-
-void MorpherPanel::setDefaultLockRefPosition (float x, float y)
-{
-    defaultLockRefX = juce::jlimit (0.0f, 1.0f, x);
-    defaultLockRefY = juce::jlimit (0.0f, 1.0f, y);
 }
 
 void MorpherPanel::setLfoEnabled (bool on)
@@ -396,29 +387,29 @@ void MorpherPanel::applyLockChipToggles()
         onMorphUiPrefsChanged();
 }
 
-void MorpherPanel::saveLocksAsDefaults()
+void MorpherPanel::clearLocks()
 {
-    defaultLockGroups = lockGroups;
-    defaultLockRefX = lockRefX;
-    defaultLockRefY = lockRefY;
-    if (onMorphUiPrefsChanged)
-        onMorphUiPrefsChanged();
-    if (onStatus)
-        onStatus ("Lock defaults saved");
-}
-
-void MorpherPanel::resetLocksToDefaults()
-{
-    lockGroups = defaultLockGroups;
-    lockRefX = defaultLockRefX;
-    lockRefY = defaultLockRefY;
+    lockGroups = morphLockNone;
     syncLockChipsFromFlags();
     lastSentVoice.reset();
     emitMorph (false, true);
     if (onMorphUiPrefsChanged)
         onMorphUiPrefsChanged();
     if (onStatus)
-        onStatus ("Locks restored to defaults");
+        onStatus ("Locks cleared");
+    repaint();
+}
+
+void MorpherPanel::restoreFactoryLocks()
+{
+    lockGroups = morphLockFactoryDefaults;
+    syncLockChipsFromFlags();
+    lastSentVoice.reset();
+    emitMorph (false, true);
+    if (onMorphUiPrefsChanged)
+        onMorphUiPrefsChanged();
+    if (onStatus)
+        onStatus ("Locks restored to factory default");
     repaint();
 }
 
@@ -437,7 +428,7 @@ void MorpherPanel::setMode (Mode m)
                      &lockPitchEg, &lockLfo, &lockScaling, &lockSens, &lockTranspose })
         c->setVisible (morph);
     resetLocksBtn.setVisible (morph);
-    setDefaultLocksBtn.setVisible (morph);
+    restoreDefaultLocksBtn.setVisible (morph);
     lfoToggle.setVisible (morph);
     lfoSync.setVisible (morph);
     lfoRate.setVisible (morph && ! lfoTempoSync);
@@ -486,10 +477,10 @@ void MorpherPanel::updateHint()
     if (allCornersReady())
     {
         if (lfoEnabled)
-            hint.setText ("Edge LFO drives the marker. Right-drag = lock ref (updates the voice when you release, including held notes).",
+            hint.setText ("Edge LFO drives the marker. Right-drag sets lock ref (needs locks on to affect sound; applies on release).",
                           juce::dontSendNotification);
         else
-            hint.setText ("Drag to morph. Right-drag = lock ref (updates the voice when you release, including held notes).",
+            hint.setText ("Drag to morph. Right-drag sets lock ref (needs locks on to affect sound; applies on release).",
                           juce::dontSendNotification);
     }
     else
@@ -753,7 +744,7 @@ void MorpherPanel::layoutLockChips (juce::Rectangle<int>& area, int minLeaveBelo
     {
         locksLabel.setBounds ({});
         resetLocksBtn.setBounds ({});
-        setDefaultLocksBtn.setBounds ({});
+        restoreDefaultLocksBtn.setBounds ({});
         for (auto* chip : { &lockEg, &lockLevels, &lockFreqCoarse, &lockFreqFine, &lockAlgo, &lockFeedback,
                             &lockPitchEg, &lockLfo, &lockScaling, &lockSens, &lockTranspose, &lockSync })
             chip->setBounds ({});
@@ -761,7 +752,7 @@ void MorpherPanel::layoutLockChips (juce::Rectangle<int>& area, int minLeaveBelo
     }
 
     locksLabel.setBounds (row.removeFromLeft (labelW));
-    setDefaultLocksBtn.setBounds (row.removeFromRight (92).reduced (1));
+    restoreDefaultLocksBtn.setBounds (row.removeFromRight (118).reduced (1));
     resetLocksBtn.setBounds (row.removeFromRight (60).reduced (1));
 
     bool outOfRoom = false;

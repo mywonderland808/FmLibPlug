@@ -27,7 +27,7 @@ public:
     Mode getMode() const { return mode; }
 
     void setCorner (int corner0to3, const VoiceData& v, const juce::String& name);
-    /** Corner voices only; locks and lock reference are untouched (see resetLocksToDefaults). */
+    /** Corner voices only; locks and lock reference are untouched (see clearLocks). */
     void clearCorners();
     /** Fired after corners are cleared (processor should reset its live snapshot). */
     std::function<void()> onCornersCleared;
@@ -45,16 +45,12 @@ public:
 
     void setLockGroups (uint32_t groups);
     uint32_t getLockGroups() const { return lockGroups; }
-    /** Session defaults snapshotted at editor open (Reset restores these). */
-    void setDefaultLockGroups (uint32_t groups);
-    uint32_t getDefaultLockGroups() const { return defaultLockGroups; }
-    void setDefaultLockRefPosition (float x, float y);
-    float getDefaultLockRefX() const { return defaultLockRefX; }
-    float getDefaultLockRefY() const { return defaultLockRefY; }
-    /** Save current locks + lock-ref as session/prefs defaults (Reset uses these). */
-    void saveLocksAsDefaults();
-    /** Restore lock groups and lock-ref to the saved defaults. */
-    void resetLocksToDefaults();
+    float getLockRefX() const { return lockRefX; }
+    float getLockRefY() const { return lockRefY; }
+    /** Clear all lock groups (lock-ref position unchanged). */
+    void clearLocks();
+    /** Apply morphLockFactoryDefaults (lock-ref position unchanged). */
+    void restoreFactoryLocks();
 
     void setLockRefPosition (float x, float y);
 
@@ -149,7 +145,6 @@ private:
     bool cornerSet[4] { false, false, false, false };
     float posX = 0.0f, posY = 0.0f;
     float lockRefX = 0.0f, lockRefY = 0.0f;
-    float defaultLockRefX = 0.0f, defaultLockRefY = 0.0f;
     bool padDragging = false;
     bool lockRefDragging = false;
     bool padGesture = false;
@@ -158,7 +153,6 @@ private:
     std::optional<VoiceData> lastSentVoice;
 
     uint32_t lockGroups = morphLockFactoryDefaults;
-    uint32_t defaultLockGroups = morphLockFactoryDefaults;
     bool lfoEnabled = false;
     bool egressPaused = false;
     float lfoRateHz = 0.25f;
@@ -175,9 +169,9 @@ private:
     juce::ToggleButton lockEg { "EG" }, lockLevels { "Levels" }, lockFreqCoarse { "Coarse" };
     juce::ToggleButton lockAlgo { "Algorithm" }, lockFeedback { "Feedback" }, lockSync { "Key sync" };
     juce::ToggleButton lockPitchEg { "Pitch EG" }, lockLfo { "LFO" };
-    juce::ToggleButton lockScaling { "Scaling" }, lockSens { "AMS" }, lockTranspose { "Transpose" };
+    juce::ToggleButton lockScaling { "Scaling" }, lockSens { "AMS/Vel" }, lockTranspose { "Transpose" };
     juce::ToggleButton lockFreqFine { "Fine" };
-    juce::TextButton resetLocksBtn { "Reset" }, setDefaultLocksBtn { "Set default" };
+    juce::TextButton resetLocksBtn { "Reset" }, restoreDefaultLocksBtn { "Restore default" };
     juce::ToggleButton lfoToggle { "Edge LFO" };
     juce::ToggleButton lfoSync { "Sync" };
     juce::ToggleButton lfoCcw { "CCW" };
