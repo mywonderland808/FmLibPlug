@@ -7,8 +7,11 @@
 #include "library/RecentStore.h"
 #include "library/TagStore.h"
 #include <juce_gui_basics/juce_gui_basics.h>
+#include <atomic>
 #include <functional>
+#include <memory>
 #include <optional>
+#include <thread>
 
 namespace fmlib
 {
@@ -24,12 +27,15 @@ public:
     using FavFn = std::function<void(uint64_t)>;
     using StatsFn = std::function<void(const BrowserStats&)>;
     using TagsChangedFn = std::function<void()>;
+    /** Resolve full PatchEntry (with VoiceData) from browse metadata. */
+    using ResolveFn = std::function<std::optional<PatchEntry>(const PatchMeta&)>;
 
     PatchBrowser();
     ~PatchBrowser() override;
 
-    void setEntries (std::vector<PatchEntry> entries, FavoritesStore* favorites, TagStore* tags = nullptr,
+    void setEntries (std::vector<PatchMeta> entries, FavoritesStore* favorites, TagStore* tags = nullptr,
                      RecentStore* recent = nullptr);
+    void setResolveCallback (ResolveFn fn) { onResolve = std::move (fn); }
     /** Bank file view (true) vs All voices flat (false). */
     void setBankFileView (bool banks);
     void setShowFileColumns (bool on);
@@ -77,14 +83,20 @@ private:
     juce::var getDragSourceDescription (const juce::SparseSet<int>& rowsToDescribe) override;
     void sortOrderChanged (int newSortColumnId, bool isForwards) override;
     void timerCallback() override;
+    void mouseDown (const juce::MouseEvent& e) override;
     void rebuildFiltered();
+    void applyRebuildResult (uint64_t generation,
+                             std::vector<BrowserRow> nextRows,
+                             BrowserStats stats,
+                             std::optional<PatchMeta> keepSelected);
     void rebuildColumns();
     void updateStickyHeader();
     void updateBankChrome();
     void updateListToggleUi();
     void applyDefaultSortForCurrentView();
     BrowserScope currentScope() const;
-    void loadRow (int row, bool loadBank);
+    enum class LoadSource { selectionChange, reclick, bankLoad };
+    void requestLoad (int row, bool loadBank, LoadSource source);
     bool toggleFavoriteOnSelection();
     int selectedVoiceRow() const;
     int nextSelectableRow (int from, int delta) const;
@@ -105,10 +117,8 @@ private:
     const std::vector<std::string>& tagsForDisplay (const PatchMeta& m) const;
     /** Returns tag name under local cell point, or empty if none. */
     std::string tagAtCellPoint (int row, int width, int height, juce::Point<float> local) const;
-    void applyColumnSort (std::vector<PatchEntry>& voices, bool keepBankGroups) const;
-    int compareEntries (const PatchEntry& a, const PatchEntry& b) const;
     static juce::String folderColumnText (const PatchMeta& m);
-    /** Lazy full entry from `all` by absolutePath + bankSlot. */
+    /** Lazy full entry via onResolve (libraryIndex / path+slot). */
     std::optional<PatchEntry> resolveEntry (const PatchMeta& m) const;
 
     class SearchField : public juce::TextEditor
@@ -138,7 +148,8 @@ private:
     bool tagFilterExpanded = false;
     bool tagFilterHasCatalog = false;
     juce::TableListBox table { "patches", this };
-    std::vector<PatchEntry> all;
+    std::shared_ptr<const std::vector<PatchMeta>> all
+        = std::make_shared<const std::vector<PatchMeta>>();
     std::vector<BrowserRow> rows;
     FavoritesStore* favStore = nullptr;
     TagStore* tagStore = nullptr;
@@ -151,6 +162,7 @@ private:
     bool sortForwards = true;
     LoadFn onLoad;
     FavFn onFav;
+    ResolveFn onResolve;
     std::function<void(bool)> onBankFileViewChanged;
     std::function<void(int, const PatchEntry&)> onAssignMorphCorner;
     std::function<void(const PatchEntry&)> onAuditionVoice;
@@ -161,11 +173,18 @@ private:
     TagsChangedFn onTagsChanged;
     BrowserStats lastStats;
     int lastSentRow = -1;
-    /** Set when selection change already loaded; consumed by cellClicked to avoid double-send. */
-    bool skipRedundantCellLoad = false;
+    /** Row selected before the current mouse interaction (for re-click vs new-select). */
+    int selectedRowBeforeClick = -1;
     /** Rebuild / silent reselect must not SysEx-load. */
     bool suppressLoad = false;
     std::optional<PatchEntry> draggedVoice;
+
+    std::atomic<uint64_t> rebuildGeneration { 0 };
+    struct RebuildCoordinator;
+    std::shared_ptr<RebuildCoordinator> rebuildCoord;
+    std::thread rebuildWorker;
+
+    void joinRebuildWorker();
 };
 
 } // namespace fmlib

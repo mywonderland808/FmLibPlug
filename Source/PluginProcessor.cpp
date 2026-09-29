@@ -149,6 +149,13 @@ juce::File FmLibPlugAudioProcessor::tagsFile() const
         .getChildFile ("tags.xml");
 }
 
+juce::File FmLibPlugAudioProcessor::libraryCacheFile() const
+{
+    return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+        .getChildFile ("FmLibPlug")
+        .getChildFile ("library-cache.v1");
+}
+
 juce::File FmLibPlugAudioProcessor::morphPresetsFile() const
 {
     return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
@@ -243,6 +250,7 @@ void FmLibPlugAudioProcessor::restoreSessionFromState (const fmlib::PluginSessio
 void FmLibPlugAudioProcessor::applyPreferencesToEngine()
 {
     library.setBaseFolders (prefs.enabledLibraryFolders());
+    library.setCacheFile (libraryCacheFile().getFullPathName().toStdString());
     midi.setChannel (prefs.midiChannel);
     midi.setSysexPacingMs (prefs.sysexPacingMs);
     midi.setMorphReleaseGuardMs (prefs.morphReleaseGuardMs);

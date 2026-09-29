@@ -5,10 +5,13 @@
 namespace fmlib
 {
 
-std::vector<PatchEntry> BrowserList::sortGrouped (std::vector<PatchEntry> entries)
+std::vector<int> BrowserList::sortGroupedIndices (const std::vector<PatchMeta>& all,
+                                                  std::vector<int> indices)
 {
-    std::sort (entries.begin(), entries.end(), [] (const PatchEntry& a, const PatchEntry& b)
+    std::sort (indices.begin(), indices.end(), [&] (int ia, int ib)
     {
+        const auto& a = all[static_cast<size_t> (ia)];
+        const auto& b = all[static_cast<size_t> (ib)];
         if (a.absolutePath != b.absolutePath)
             return a.absolutePath < b.absolutePath;
         const int sa = a.bankSlot > 0 ? a.bankSlot : 999;
@@ -17,49 +20,66 @@ std::vector<PatchEntry> BrowserList::sortGrouped (std::vector<PatchEntry> entrie
             return sa < sb;
         return a.voiceName < b.voiceName;
     });
-    return entries;
+    return indices;
 }
 
-std::vector<BrowserRow> BrowserList::buildRows (std::vector<PatchEntry> voices, bool groupByBank)
+std::vector<BrowserRow> BrowserList::buildRows (const std::vector<PatchMeta>& all,
+                                                const std::vector<int>& voiceIndices,
+                                                bool groupByBank)
 {
     std::vector<BrowserRow> rows;
     if (! groupByBank)
     {
-        rows.reserve (voices.size());
-        for (auto& e : voices)
+        rows.reserve (voiceIndices.size());
+        for (int idx : voiceIndices)
         {
+            if (idx < 0 || static_cast<size_t> (idx) >= all.size())
+                continue;
             BrowserRow r;
             r.kind = BrowserRowKind::voice;
-            r.bankPath = e.absolutePath;
-            r.meta = std::move (static_cast<PatchMeta&> (e));
+            r.bankPath = all[static_cast<size_t> (idx)].absolutePath;
+            r.meta = all[static_cast<size_t> (idx)];
             rows.push_back (std::move (r));
         }
         return rows;
     }
 
     size_t i = 0;
-    while (i < voices.size())
+    while (i < voiceIndices.size())
     {
-        const auto path = voices[i].absolutePath;
+        const int firstIdx = voiceIndices[i];
+        if (firstIdx < 0 || static_cast<size_t> (firstIdx) >= all.size())
+        {
+            ++i;
+            continue;
+        }
+        const auto path = all[static_cast<size_t> (firstIdx)].absolutePath;
         size_t j = i + 1;
-        while (j < voices.size() && voices[j].absolutePath == path)
+        while (j < voiceIndices.size())
+        {
+            const int jIdx = voiceIndices[j];
+            if (jIdx < 0 || static_cast<size_t> (jIdx) >= all.size()
+                || all[static_cast<size_t> (jIdx)].absolutePath != path)
+                break;
             ++j;
+        }
 
         BrowserRow header;
         header.kind = BrowserRowKind::sectionHeader;
         header.bankPath = path;
         header.sectionLabel = path.stem().string();
         if (header.sectionLabel.empty())
-            header.sectionLabel = voices[i].fileName;
+            header.sectionLabel = all[static_cast<size_t> (firstIdx)].fileName;
         header.sectionVoiceCount = static_cast<int> (j - i);
         rows.push_back (std::move (header));
 
         for (size_t k = i; k < j; ++k)
         {
+            const int vIdx = voiceIndices[k];
             BrowserRow r;
             r.kind = BrowserRowKind::voice;
             r.bankPath = path;
-            r.meta = std::move (static_cast<PatchMeta&> (voices[k]));
+            r.meta = all[static_cast<size_t> (vIdx)];
             rows.push_back (std::move (r));
         }
         i = j;
@@ -67,14 +87,14 @@ std::vector<BrowserRow> BrowserList::buildRows (std::vector<PatchEntry> voices, 
     return rows;
 }
 
-BrowserFilterResult BrowserList::filterForBrowser (const std::vector<PatchEntry>& all,
+BrowserFilterResult BrowserList::filterForBrowser (const std::vector<PatchMeta>& all,
                                                    BrowserScope scope,
                                                    const LibraryFilterQuery& query,
                                                    const FavoritesStore& favorites,
                                                    const TagStore* tags,
                                                    const std::unordered_set<uint64_t>* recentIds)
 {
-    auto inScope = [scope] (const PatchEntry& e)
+    auto inScope = [scope] (const PatchMeta& e)
     {
         return scope != BrowserScope::bankFiles || isBankFileVoice (e);
     };
@@ -82,12 +102,16 @@ BrowserFilterResult BrowserList::filterForBrowser (const std::vector<PatchEntry>
     std::unordered_map<uint64_t, int> counts;
     counts.reserve (all.size());
     int total = 0;
-    for (const auto& e : all)
+    std::vector<int> scoped;
+    scoped.reserve (all.size());
+    for (int i = 0; i < static_cast<int> (all.size()); ++i)
     {
+        const auto& e = all[static_cast<size_t> (i)];
         if (! inScope (e))
             continue;
         ++total;
         ++counts[e.contentId];
+        scoped.push_back (i);
     }
 
     int dupeVoices = 0;
@@ -100,25 +124,161 @@ BrowserFilterResult BrowserList::filterForBrowser (const std::vector<PatchEntry>
     out.stats.duplicates = dupeVoices;
 
     const bool noExpr = query.orGroups.empty() && ! query.favoritesOnly && ! query.duplicatesOnly;
-    out.voices.reserve (static_cast<size_t> (total));
     if (noExpr)
     {
-        for (const auto& e : all)
-            if (inScope (e))
-                out.voices.push_back (e);
+        out.voiceIndices = std::move (scoped);
     }
     else
     {
-        std::vector<PatchEntry> scoped;
-        scoped.reserve (static_cast<size_t> (total));
-        for (const auto& e : all)
-            if (inScope (e))
-                scoped.push_back (e);
-        out.voices = LibraryFilter::apply (std::move (scoped), query, favorites, tags, recentIds);
+        out.voiceIndices = LibraryFilter::matchingIndices (all, query, favorites, tags, recentIds, &scoped);
     }
 
-    out.stats.shown = static_cast<int> (out.voices.size());
+    out.stats.shown = static_cast<int> (out.voiceIndices.size());
     return out;
+}
+
+int BrowserList::compareMetas (const PatchMeta& a, const PatchMeta& b,
+                               int sortColumnId, bool sortForwards,
+                               bool aFavorite, bool bFavorite,
+                               const TagDisplayFn& tagsOf)
+{
+    auto nameOf = [] (const PatchMeta& e) -> const std::string&
+    {
+        return e.nameSortKey;
+    };
+    auto fileOf = [] (const PatchMeta& e) -> const std::string&
+    {
+        return e.fileNameLower.empty() ? e.fileName : e.fileNameLower;
+    };
+    auto pathOf = [] (const PatchMeta& e) -> const std::string&
+    {
+        return e.relativePathLower.empty() ? e.relativePath : e.relativePathLower;
+    };
+
+    int primary = 0;
+    switch (sortColumnId)
+    {
+        case 1:
+            if (aFavorite != bFavorite)
+                primary = aFavorite ? -1 : 1;
+            break;
+        case 3:
+            if (fileOf (a) < fileOf (b))
+                primary = -1;
+            else if (fileOf (b) < fileOf (a))
+                primary = 1;
+            break;
+        case 4:
+            if (pathOf (a) < pathOf (b))
+                primary = -1;
+            else if (pathOf (b) < pathOf (a))
+                primary = 1;
+            break;
+        case 5:
+            if (a.bankSlot < b.bankSlot)
+                primary = -1;
+            else if (b.bankSlot < a.bankSlot)
+                primary = 1;
+            break;
+        case 6:
+        {
+            static const std::string empty;
+            const auto& ta = tagsOf ? tagsOf (a) : empty;
+            const auto& tb = tagsOf ? tagsOf (b) : empty;
+            if (ta < tb)
+                primary = -1;
+            else if (tb < ta)
+                primary = 1;
+            break;
+        }
+        case 2:
+        default:
+            break;
+    }
+
+    if (primary != 0)
+        return sortForwards ? primary : -primary;
+
+    if (nameOf (a) < nameOf (b))
+        return sortForwards ? -1 : 1;
+    if (nameOf (b) < nameOf (a))
+        return sortForwards ? 1 : -1;
+    if (a.absolutePath < b.absolutePath)
+        return sortForwards ? -1 : 1;
+    if (b.absolutePath < a.absolutePath)
+        return sortForwards ? 1 : -1;
+    if (a.bankSlot < b.bankSlot)
+        return sortForwards ? -1 : 1;
+    if (b.bankSlot < a.bankSlot)
+        return sortForwards ? 1 : -1;
+    return 0;
+}
+
+void BrowserList::applyColumnSort (const std::vector<PatchMeta>& all,
+                                   std::vector<int>& indices,
+                                   int sortColumnId,
+                                   bool sortForwards,
+                                   bool keepBankGroups,
+                                   const FavoritesStore* favorites,
+                                   const TagDisplayFn& tagsOf)
+{
+    if (indices.size() < 2)
+        return;
+
+    auto less = [&] (int ia, int ib)
+    {
+        const auto& a = all[static_cast<size_t> (ia)];
+        const auto& b = all[static_cast<size_t> (ib)];
+        const bool fa = favorites != nullptr && favorites->isFavorite (a.contentId);
+        const bool fb = favorites != nullptr && favorites->isFavorite (b.contentId);
+        // compareMetas already applies sortForwards; treat as strict weak ordering.
+        return compareMetas (a, b, sortColumnId, sortForwards, fa, fb, tagsOf) < 0;
+    };
+
+    if (! keepBankGroups)
+    {
+        std::stable_sort (indices.begin(), indices.end(), less);
+        return;
+    }
+
+    // Keep voices from the same bank file together; sort within each bank, then
+    // order banks by the sort key of their first voice (except Slot — keep file order).
+    std::stable_sort (indices.begin(), indices.end(), [&] (int ia, int ib)
+    {
+        return all[static_cast<size_t> (ia)].absolutePath < all[static_cast<size_t> (ib)].absolutePath;
+    });
+
+    std::vector<std::pair<size_t, size_t>> groups;
+    size_t i = 0;
+    while (i < indices.size())
+    {
+        size_t j = i + 1;
+        while (j < indices.size()
+               && all[static_cast<size_t> (indices[j])].absolutePath
+                      == all[static_cast<size_t> (indices[i])].absolutePath)
+            ++j;
+        std::stable_sort (indices.begin() + static_cast<std::ptrdiff_t> (i),
+                          indices.begin() + static_cast<std::ptrdiff_t> (j),
+                          less);
+        groups.emplace_back (i, j);
+        i = j;
+    }
+
+    if (sortColumnId != 5)
+    {
+        std::stable_sort (groups.begin(), groups.end(),
+                          [&] (const std::pair<size_t, size_t>& ga, const std::pair<size_t, size_t>& gb)
+                          {
+                              return less (indices[ga.first], indices[gb.first]);
+                          });
+        std::vector<int> flattened;
+        flattened.reserve (indices.size());
+        for (const auto& g : groups)
+            flattened.insert (flattened.end(),
+                              indices.begin() + static_cast<std::ptrdiff_t> (g.first),
+                              indices.begin() + static_cast<std::ptrdiff_t> (g.second));
+        indices.swap (flattened);
+    }
 }
 
 int BrowserList::countVoiceRows (const std::vector<BrowserRow>& rows)

@@ -102,3 +102,38 @@ TEST_CASE ("Concatenated singles resolve by libraryIndex, not first path match",
     REQUIRE_FALSE (lib.findEntryByIndex (-1).has_value());
     REQUIRE_FALSE (lib.findEntryByIndex (99).has_value());
 }
+
+TEST_CASE ("PatchLibrary resolveMeta matches index and fallback path", "[library][resolve]")
+{
+    const std::filesystem::path path = "/lib/concat.syx";
+    std::vector<PatchEntry> entries;
+    entries.push_back (makeSingle (path, 1, 0x1111));
+    entries.push_back (makeSingle (path, 2, 0x2222));
+
+    PatchLibrary lib;
+    lib.replaceEntriesForTest (std::move (entries));
+
+    PatchMeta m0;
+    m0.libraryIndex = 0;
+    m0.absolutePath = path;
+    m0.bankSlot = -1;
+    m0.contentId = 0x1111;
+    auto r0 = lib.resolveMeta (m0);
+    REQUIRE (r0.has_value());
+    REQUIRE (r0->voice[0] == 1);
+
+    PatchMeta byContentId;
+    byContentId.libraryIndex = -1;
+    byContentId.absolutePath = path;
+    byContentId.bankSlot = -1;
+    byContentId.contentId = 0x2222;
+    auto byPath = lib.resolveMeta (byContentId);
+    REQUIRE (byPath.has_value());
+    REQUIRE (byPath->voice[0] == 2);
+
+    PatchMeta bank;
+    bank.absolutePath = "/lib/bank.syx";
+    bank.bankSlot = 5;
+    bank.contentId = 99;
+    REQUIRE_FALSE (lib.resolveMeta (bank).has_value());
+}

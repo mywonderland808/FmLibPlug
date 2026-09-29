@@ -29,13 +29,69 @@ bool readFileBytes (const std::filesystem::path& path, std::vector<uint8_t>& byt
     in.read (reinterpret_cast<char*> (bytes.data()), static_cast<std::streamsize> (sz));
     return static_cast<uintmax_t> (in.gcount()) == sz;
 }
+
+void refreshCachedVoicePaths (PatchEntry& e,
+                              const std::filesystem::path& filePath,
+                              const std::filesystem::path& base)
+{
+    std::error_code ec;
+    const auto rel = std::filesystem::relative (filePath, base, ec);
+    e.relativePath = ec ? filePath.filename().string() : rel.generic_string();
+    e.absolutePath = filePath;
+    e.baseFolder = base;
+    e.fileName = filePath.filename().string();
+    e.refreshSearchCache();
+}
+
+void appendParsedVoices (FolderScanner::Result& result,
+                         const std::filesystem::path& filePath,
+                         const std::filesystem::path& base,
+                         const std::vector<uint8_t>& bytes)
+{
+    const auto parsed = FormatDetect::parseSupported (bytes.data(), bytes.size());
+    if (parsed.voices.empty())
+    {
+        ++result.filesSkipped;
+        return;
+    }
+
+    std::error_code ec;
+    const auto rel = std::filesystem::relative (filePath, base, ec);
+    const auto relStr = ec ? filePath.filename().string() : rel.generic_string();
+
+    for (const auto& v : parsed.voices)
+    {
+        PatchEntry e;
+        e.voice = v.data;
+        e.bankSlot = v.bankSlot;
+        e.voiceName = voiceNameFromData (v.data);
+        e.fileName = filePath.filename().string();
+        e.relativePath = relStr;
+        e.absolutePath = filePath;
+        e.baseFolder = base;
+        e.contentId = contentIdFromVoice (v.data);
+        e.refreshSearchCache();
+        result.entries.push_back (std::move (e));
+        ++result.voicesFound;
+    }
+}
 } // namespace
 
 FolderScanner::Result FolderScanner::scan (const std::vector<std::filesystem::path>& baseFolders,
                                            std::atomic<bool>* cancelFlag,
-                                           ProgressFn progress)
+                                           ProgressFn progress,
+                                           const std::filesystem::path& cachePath)
 {
     Result result;
+    LibraryCache cache;
+    const bool useCache = ! cachePath.empty();
+    if (useCache)
+    {
+        cache.loadFromFile (cachePath); // corrupt → empty
+        cache.retainUnderBases (baseFolders);
+    }
+
+    LibraryCache nextCache;
 
     for (const auto& base : baseFolders)
     {
@@ -68,36 +124,47 @@ FolderScanner::Result FolderScanner::scan (const std::vector<std::filesystem::pa
                 continue;
 
             ++result.filesScanned;
+            const auto filePath = it->path();
+            const auto fp = LibraryCache::fingerprintOf (filePath);
+
+            if (useCache)
+            {
+                if (const auto* hit = cache.find (filePath);
+                    hit != nullptr && hit->fingerprint == fp && ! hit->voices.empty())
+                {
+                    for (auto e : hit->voices)
+                    {
+                        refreshCachedVoicePaths (e, filePath, base);
+                        result.entries.push_back (std::move (e));
+                        ++result.voicesFound;
+                    }
+                    ++result.filesFromCache;
+                    nextCache.upsert (filePath, *hit);
+                    if (progress && (result.filesScanned & 31) == 0)
+                        progress (result.filesScanned, result.voicesFound, result.filesSkipped);
+                    continue;
+                }
+            }
+
             std::vector<uint8_t> bytes;
-            if (! readFileBytes (it->path(), bytes))
-            {
-                ++result.filesSkipped;
-                continue;
-            }
-            const auto parsed = FormatDetect::parseSupported (bytes.data(), bytes.size());
-            if (parsed.voices.empty())
+            if (! readFileBytes (filePath, bytes))
             {
                 ++result.filesSkipped;
                 continue;
             }
 
-            const auto rel = std::filesystem::relative (it->path(), base, ec);
-            const auto relStr = ec ? it->path().filename().string() : rel.generic_string();
+            const auto before = result.entries.size();
+            appendParsedVoices (result, filePath, base, bytes);
+            if (result.entries.size() == before)
+                continue;
 
-            for (const auto& v : parsed.voices)
+            if (useCache)
             {
-                PatchEntry e;
-                e.voice = v.data;
-                e.bankSlot = v.bankSlot;
-                e.voiceName = voiceNameFromData (v.data);
-                e.fileName = it->path().filename().string();
-                e.relativePath = relStr;
-                e.absolutePath = it->path();
-                e.baseFolder = base;
-                e.contentId = contentIdFromVoice (v.data);
-                e.refreshSearchCache();
-                result.entries.push_back (std::move (e));
-                ++result.voicesFound;
+                LibraryCacheFileEntry entry;
+                entry.fingerprint = fp;
+                entry.voices.assign (result.entries.begin() + static_cast<std::ptrdiff_t> (before),
+                                     result.entries.end());
+                nextCache.upsert (filePath, std::move (entry));
             }
 
             if (progress && (result.filesScanned & 31) == 0)
@@ -107,6 +174,9 @@ FolderScanner::Result FolderScanner::scan (const std::vector<std::filesystem::pa
 
     if (progress)
         progress (result.filesScanned, result.voicesFound, result.filesSkipped);
+
+    if (useCache && (cancelFlag == nullptr || ! cancelFlag->load()))
+        nextCache.saveToFile (cachePath);
 
     return result;
 }

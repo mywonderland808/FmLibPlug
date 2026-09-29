@@ -17,7 +17,7 @@ public:
     using StatusFn = std::function<void(const juce::String&)>;
 
     DeviceBufferPanel();
-    ~DeviceBufferPanel() override = default;
+    ~DeviceBufferPanel() override;
 
     void setBuffer (DeviceBuffer* buffer);
     void refreshList();
@@ -31,6 +31,8 @@ public:
     void itemDropped (const SourceDetails& dragSourceDetails) override;
     /** Clears drag-silence state when a DnD operation finishes (drop or cancel). */
     void notifyDragEnded();
+
+    void mouseDown (const juce::MouseEvent& e) override;
 
     ActionFn onRequest1, onRequest32, onSave, onClear, onSend;
     LoadFn onLoadVoice;
@@ -52,6 +54,8 @@ private:
     int dropHighlightRow = -1;
     int dragSourceRow = -1;
     bool dragOver = false;
+    /** Row selected before the current mouse press (re-click vs new select). */
+    int selectedRowBeforeClick = -1;
     /** When true, selection changes must not SysEx-load (drag / silent select). */
     bool suppressLoad = false;
 
@@ -66,7 +70,8 @@ private:
         juce::var getDragSourceDescription (const juce::SparseSet<int>& rowsToDescribe) override;
     } model;
 
-    void loadRow (int row);
+    enum class LoadSource { selectionChange, reclick };
+    void requestLoad (int row, LoadSource source);
     void selectRowSilent (int row);
     void showVoiceContextMenu (int row);
     int rowAtDrag (const SourceDetails& details) const;

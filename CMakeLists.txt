@@ -63,6 +63,7 @@ target_sources(FmLibPlug
     Source/PluginEditor.cpp
     Source/library/PatchLibrary.cpp
     Source/library/FolderScanner.cpp
+    Source/library/LibraryCache.cpp
     Source/library/FavoritesStore.cpp
     Source/library/PatchWriter.cpp
     Source/library/LibraryFilter.cpp
@@ -225,6 +226,7 @@ if(FMLIBPLUG_BUILD_TESTS)
     Tests/unit/MidiHostRoutingTests.cpp
     Tests/unit/AuditionHoldInputsTests.cpp
     Tests/unit/PatchLibraryTests.cpp
+    Tests/unit/LibraryCacheTests.cpp
     Source/sysex/Dx7Formats.cpp
     Source/sysex/SysexParser.cpp
     Source/sysex/SysexMessages.cpp
@@ -234,6 +236,7 @@ if(FMLIBPLUG_BUILD_TESTS)
     Source/sysex/MorphLocks.cpp
     Source/midi/MorphTransport.cpp
     Source/library/FolderScanner.cpp
+    Source/library/LibraryCache.cpp
     Source/library/PatchWriter.cpp
     Source/library/FavoritesStore.cpp
     Source/library/LibraryFilter.cpp

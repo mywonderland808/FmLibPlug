@@ -72,15 +72,21 @@ class LibraryFilter
 public:
     static LibraryFilterQuery parse (const std::string& raw, bool favoritesToggle);
 
-    /** Moves matching entries out of `all` into the result. */
-    static std::vector<PatchEntry> apply (std::vector<PatchEntry> all,
-                                          const LibraryFilterQuery& query,
-                                          const FavoritesStore& favorites,
-                                          const TagStore* tags = nullptr,
-                                          const std::unordered_set<uint64_t>* recentIds = nullptr);
+    /**
+     * Indices into `all` that match the query (order preserved).
+     * If `candidates` is non-null, only those indices are considered (and dupe: counts within them).
+     * Empty query + no favorites/duplicates constraints returns every candidate (or all indices).
+     */
+    static std::vector<int> matchingIndices (const std::vector<PatchMeta>& all,
+                                             const LibraryFilterQuery& query,
+                                             const FavoritesStore& favorites,
+                                             const TagStore* tags = nullptr,
+                                             const std::unordered_set<uint64_t>* recentIds = nullptr,
+                                             const std::vector<int>* candidates = nullptr);
 
     /** Keep first occurrence of each contentId (call after sorting so the kept copy matches sort order). */
-    static std::vector<PatchEntry> keepFirstByContentId (std::vector<PatchEntry> voices);
+    static std::vector<int> keepFirstByContentId (const std::vector<PatchMeta>& all,
+                                                  std::vector<int> indices);
 
     /** How a missing tag chip combines with the current search query. */
     enum class TagChipCombine

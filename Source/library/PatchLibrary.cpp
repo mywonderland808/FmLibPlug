@@ -72,6 +72,28 @@ std::optional<PatchEntry> PatchLibrary::findEntryByIndex (int libraryIndex) cons
     return entries[static_cast<size_t> (libraryIndex)];
 }
 
+std::optional<PatchEntry> PatchLibrary::resolveMeta (const PatchMeta& m) const
+{
+    std::lock_guard lock (mutex);
+    if (m.libraryIndex >= 0 && static_cast<size_t> (m.libraryIndex) < entries.size())
+    {
+        const auto& e = entries[static_cast<size_t> (m.libraryIndex)];
+        if (e.libraryIndex == m.libraryIndex
+            && e.absolutePath == m.absolutePath
+            && e.bankSlot == m.bankSlot)
+            return e;
+    }
+
+    for (const auto& e : entries)
+    {
+        if (e.absolutePath != m.absolutePath || e.bankSlot != m.bankSlot)
+            continue;
+        if (m.bankSlot > 0 || e.contentId == m.contentId)
+            return e;
+    }
+    return std::nullopt;
+}
+
 PatchLibrary::PatchLibrary() = default;
 
 PatchLibrary::~PatchLibrary()
@@ -117,7 +139,9 @@ void PatchLibrary::rescanAsync()
     worker = std::thread ([this]
     {
         FolderScanner scanner;
-        auto result = scanner.scan (baseFolders, &cancel);
+        auto result = scanner.scan (baseFolders, &cancel, nullptr, cacheFile);
+        if (cancel.load())
+            return;
         {
             std::lock_guard lock (mutex);
             skippedFiles = result.filesSkipped;
@@ -132,6 +156,22 @@ std::vector<PatchEntry> PatchLibrary::getEntriesCopy() const
 {
     std::lock_guard lock (mutex);
     return entries;
+}
+
+std::vector<PatchMeta> PatchLibrary::getMetaCopy() const
+{
+    std::lock_guard lock (mutex);
+    std::vector<PatchMeta> out;
+    out.reserve (entries.size());
+    for (const auto& e : entries)
+        out.push_back (static_cast<const PatchMeta&> (e));
+    return out;
+}
+
+int PatchLibrary::getEntryCount() const
+{
+    std::lock_guard lock (mutex);
+    return static_cast<int> (entries.size());
 }
 
 std::optional<std::array<VoiceData, kBankVoiceCount>> PatchLibrary::getBankVoices (

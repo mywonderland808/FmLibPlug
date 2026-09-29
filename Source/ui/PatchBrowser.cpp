@@ -5,8 +5,6 @@
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
-#include <iterator>
-#include <numeric>
 #include <unordered_set>
 
 namespace fmlib
@@ -46,7 +44,15 @@ std::vector<TagChip> layoutTagChips (const std::vector<std::string>& tags,
 }
 } // namespace
 
+struct PatchBrowser::RebuildCoordinator
+{
+    std::atomic<bool> alive { true };
+    std::atomic<bool> running { false };
+    std::atomic<bool> pending { false };
+};
+
 PatchBrowser::PatchBrowser()
+    : rebuildCoord (std::make_shared<RebuildCoordinator>())
 {
     search.setTextToShowWhenEmpty ("Search... (click for filters)", juce::Colours::grey);
     search.setTooltip ("Type to filter. Left-click inserts filter tokens; right-click for cut/copy/paste.");
@@ -126,11 +132,26 @@ PatchBrowser::PatchBrowser()
     addAndMakeVisible (table);
     setWantsKeyboardFocus (true);
     updateBankChrome();
+    table.addMouseListener (this, true);
 }
 
 PatchBrowser::~PatchBrowser()
 {
+    table.removeMouseListener (this);
     table.removeKeyListener (this);
+    if (rebuildCoord != nullptr)
+        rebuildCoord->alive = false;
+    ++rebuildGeneration;
+    if (rebuildWorker.joinable())
+        rebuildWorker.detach();
+}
+
+void PatchBrowser::joinRebuildWorker()
+{
+    if (rebuildWorker.joinable())
+        rebuildWorker.join();
+    if (rebuildCoord != nullptr)
+        rebuildCoord->running = false;
 }
 
 void PatchBrowser::rebuildColumns()
@@ -273,16 +294,17 @@ void PatchBrowser::updateBankChrome()
     resized();
 }
 
-void PatchBrowser::setEntries (std::vector<PatchEntry> entries, FavoritesStore* favorites, TagStore* tags,
+void PatchBrowser::setEntries (std::vector<PatchMeta> entries, FavoritesStore* favorites, TagStore* tags,
                                RecentStore* recent)
 {
-    all = std::move (entries);
-    for (size_t i = 0; i < all.size(); ++i)
+    for (size_t i = 0; i < entries.size(); ++i)
     {
-        all[i].libraryIndex = static_cast<int> (i);
-        if (all[i].voiceNameLower.empty() || all[i].nameSortKey.empty())
-            all[i].refreshSearchCache();
+        if (entries[i].libraryIndex < 0)
+            entries[i].libraryIndex = static_cast<int> (i);
+        if (entries[i].voiceNameLower.empty() || entries[i].nameSortKey.empty())
+            entries[i].refreshSearchCache();
     }
+    all = std::make_shared<const std::vector<PatchMeta>> (std::move (entries));
     favStore = favorites;
     tagStore = tags;
     recentStore = recent;
@@ -301,23 +323,8 @@ std::optional<PatchEntry> PatchBrowser::getSelectedVoice() const
 
 std::optional<PatchEntry> PatchBrowser::resolveEntry (const PatchMeta& m) const
 {
-    if (juce::isPositiveAndBelow (m.libraryIndex, static_cast<int> (all.size())))
-    {
-        const auto& e = all[static_cast<size_t> (m.libraryIndex)];
-        if (e.libraryIndex == m.libraryIndex
-            && e.absolutePath == m.absolutePath
-            && e.bankSlot == m.bankSlot)
-            return e;
-    }
-
-    // Fallback if indices were invalidated mid-rescan: path + slot, then contentId for singles.
-    for (const auto& e : all)
-    {
-        if (e.absolutePath != m.absolutePath || e.bankSlot != m.bankSlot)
-            continue;
-        if (m.bankSlot > 0 || e.contentId == m.contentId)
-            return e;
-    }
+    if (onResolve)
+        return onResolve (m);
     return std::nullopt;
 }
 
@@ -670,167 +677,6 @@ void PatchBrowser::timerCallback()
     refreshTagStrip();
 }
 
-int PatchBrowser::compareEntries (const PatchEntry& a, const PatchEntry& b) const
-{
-    auto nameOf = [] (const PatchEntry& e) -> const std::string&
-    {
-        // Same buckets as A-Z jumps: letters A-Z, everything else one group.
-        return e.nameSortKey;
-    };
-    auto fileOf = [] (const PatchEntry& e) -> const std::string&
-    {
-        return e.fileNameLower.empty() ? e.fileName : e.fileNameLower;
-    };
-    auto pathOf = [] (const PatchEntry& e) -> const std::string&
-    {
-        return e.relativePathLower.empty() ? e.relativePath : e.relativePathLower;
-    };
-    auto tagsOf = [this] (const PatchEntry& e) -> const std::string&
-    {
-        static const std::string empty;
-        return tagStore != nullptr ? tagStore->displayJoined (e.contentId) : empty;
-    };
-
-    switch (sortColumnId)
-    {
-        case 1:
-        {
-            const bool fa = favStore != nullptr && favStore->isFavorite (a.contentId);
-            const bool fb = favStore != nullptr && favStore->isFavorite (b.contentId);
-            if (fa != fb)
-                return fa ? -1 : 1;
-            break;
-        }
-        case 3:
-        {
-            if (fileOf (a) < fileOf (b))
-                return -1;
-            if (fileOf (b) < fileOf (a))
-                return 1;
-            break;
-        }
-        case 4:
-        {
-            if (pathOf (a) < pathOf (b))
-                return -1;
-            if (pathOf (b) < pathOf (a))
-                return 1;
-            break;
-        }
-        case 5:
-        {
-            if (a.bankSlot < b.bankSlot)
-                return -1;
-            if (b.bankSlot < a.bankSlot)
-                return 1;
-            break;
-        }
-        case 6:
-        {
-            const auto& ta = tagsOf (a);
-            const auto& tb = tagsOf (b);
-            if (ta < tb)
-                return -1;
-            if (tb < ta)
-                return 1;
-            break;
-        }
-        case 2:
-        default:
-            break;
-    }
-
-    if (nameOf (a) < nameOf (b))
-        return -1;
-    if (nameOf (b) < nameOf (a))
-        return 1;
-    if (a.absolutePath < b.absolutePath)
-        return -1;
-    if (b.absolutePath < a.absolutePath)
-        return 1;
-    if (a.bankSlot < b.bankSlot)
-        return -1;
-    if (b.bankSlot < a.bankSlot)
-        return 1;
-    return 0;
-}
-
-void PatchBrowser::applyColumnSort (std::vector<PatchEntry>& voices, bool keepBankGroups) const
-{
-    if (voices.size() < 2)
-        return;
-
-    const bool fwd = sortForwards;
-    auto less = [this, fwd] (const PatchEntry& a, const PatchEntry& b)
-    {
-        const int c = compareEntries (a, b);
-        if (c == 0)
-            return false;
-        return fwd ? (c < 0) : (c > 0);
-    };
-
-    std::vector<size_t> order (voices.size());
-    std::iota (order.begin(), order.end(), 0);
-
-    auto applyOrder = [&voices] (std::vector<size_t>& idx)
-    {
-        std::vector<PatchEntry> next;
-        next.reserve (idx.size());
-        for (auto i : idx)
-            next.push_back (std::move (voices[i]));
-        voices = std::move (next);
-    };
-
-    if (! keepBankGroups)
-    {
-        std::stable_sort (order.begin(), order.end(), [&] (size_t i, size_t j)
-        {
-            return less (voices[i], voices[j]);
-        });
-        applyOrder (order);
-        return;
-    }
-
-    // Keep voices from the same bank file together; sort within each bank, then
-    // order banks by the sort key of their first voice (except Slot — keep file order).
-    std::stable_sort (order.begin(), order.end(), [&] (size_t i, size_t j)
-    {
-        return voices[i].absolutePath < voices[j].absolutePath;
-    });
-
-    std::vector<std::pair<size_t, size_t>> groups;
-    size_t i = 0;
-    while (i < order.size())
-    {
-        size_t j = i + 1;
-        while (j < order.size() && voices[order[j]].absolutePath == voices[order[i]].absolutePath)
-            ++j;
-        std::stable_sort (order.begin() + static_cast<std::ptrdiff_t> (i),
-                          order.begin() + static_cast<std::ptrdiff_t> (j),
-                          [&] (size_t a, size_t b) { return less (voices[a], voices[b]); });
-        groups.emplace_back (i, j);
-        i = j;
-    }
-
-    if (sortColumnId != 5)
-    {
-        std::stable_sort (groups.begin(), groups.end(), [&] (const std::pair<size_t, size_t>& ga,
-                                                             const std::pair<size_t, size_t>& gb)
-        {
-            return less (voices[order[ga.first]], voices[order[gb.first]]);
-        });
-        std::vector<size_t> flattened;
-        flattened.reserve (order.size());
-        for (const auto& g : groups)
-            flattened.insert (flattened.end(),
-                              order.begin() + static_cast<std::ptrdiff_t> (g.first),
-                              order.begin() + static_cast<std::ptrdiff_t> (g.second));
-        order.swap (flattened);
-    }
-
-    applyOrder (order);
-}
-
 void PatchBrowser::sortOrderChanged (int newSortColumnId, bool isForwards)
 {
     sortColumnId = newSortColumnId;
@@ -839,44 +685,17 @@ void PatchBrowser::sortOrderChanged (int newSortColumnId, bool isForwards)
     rebuildFiltered();
 }
 
-void PatchBrowser::rebuildFiltered()
+void PatchBrowser::applyRebuildResult (uint64_t generation,
+                                       std::vector<BrowserRow> nextRows,
+                                       BrowserStats stats,
+                                       std::optional<PatchMeta> keepSelected)
 {
-    std::optional<PatchMeta> keepSelected;
-    if (const int sel = selectedVoiceRow(); sel >= 0)
-        keepSelected = rows[static_cast<size_t> (sel)].meta;
+    if (generation != rebuildGeneration.load())
+        return;
 
-    FavoritesStore empty;
-    const auto* store = favStore != nullptr ? favStore : &empty;
-
-    auto q = LibraryFilter::parse (search.getText().toStdString(), favOnly.getToggleState());
-    if (bankFileView && q.hasSingles())
-    {
-        bankFileView = false;
-        groupToggle.setToggleState (false, juce::dontSendNotification);
-        updateListToggleUi();
-        applyDefaultSortForCurrentView();
-        updateBankChrome();
-        if (onBankFileViewChanged)
-            onBankFileViewChanged (false);
-    }
-
-    const auto recentIds = recentStore != nullptr ? recentStore->contentIds() : std::unordered_set<uint64_t> {};
-    const auto* recentPtr = (q.recentOnly && recentStore != nullptr) ? &recentIds : nullptr;
-
-    auto filtered = BrowserList::filterForBrowser (all, currentScope(), q, *store, tagStore, recentPtr);
-    auto voices = std::move (filtered.voices);
-
-    // Bank view always groups by file; All stays flat.
-    const bool grouping = bankFileView && q.orGroups.empty() && ! q.duplicatesOnly;
-    applyColumnSort (voices, grouping);
-    // Dedupe after sort so the kept copy matches the active column order.
-    if (hideDuplicates && ! q.duplicatesOnly)
-        voices = LibraryFilter::keepFirstByContentId (std::move (voices));
-
-    rows = BrowserList::buildRows (std::move (voices), grouping);
+    rows = std::move (nextRows);
     lastSentRow = -1;
-
-    lastStats = filtered.stats;
+    lastStats = stats;
     lastStats.shown = BrowserList::countVoiceRows (rows);
     if (onStatsChanged)
         onStatsChanged (lastStats);
@@ -905,6 +724,157 @@ void PatchBrowser::rebuildFiltered()
     suppressLoad = false;
     table.repaint();
     updateStickyHeader();
+}
+
+void PatchBrowser::rebuildFiltered()
+{
+    std::optional<PatchMeta> keepSelected;
+    if (const int sel = selectedVoiceRow(); sel >= 0)
+        keepSelected = rows[static_cast<size_t> (sel)].meta;
+
+    auto q = LibraryFilter::parse (search.getText().toStdString(), favOnly.getToggleState());
+    if (bankFileView && q.hasSingles())
+    {
+        bankFileView = false;
+        groupToggle.setToggleState (false, juce::dontSendNotification);
+        updateListToggleUi();
+        applyDefaultSortForCurrentView();
+        updateBankChrome();
+        if (onBankFileViewChanged)
+            onBankFileViewChanged (false);
+        q = LibraryFilter::parse (search.getText().toStdString(), favOnly.getToggleState());
+    }
+
+    const auto scope = currentScope();
+    const bool grouping = bankFileView && q.orGroups.empty() && ! q.duplicatesOnly;
+    const bool hideDupes = hideDuplicates && ! q.duplicatesOnly;
+    const int col = sortColumnId;
+    const bool fwd = sortForwards;
+    const auto allSnap = all;
+    const auto recentIds = recentStore != nullptr ? recentStore->contentIds() : std::unordered_set<uint64_t> {};
+    const bool needRecent = q.recentOnly && recentStore != nullptr;
+
+    FavoritesStore favSnap;
+    if (favStore != nullptr)
+        favSnap = *favStore;
+    std::optional<TagStore> tagSnap;
+    if (tagStore != nullptr)
+        tagSnap = *tagStore;
+
+    const uint64_t jobGen = ++rebuildGeneration;
+    joinRebuildWorker();
+
+    const auto coord = rebuildCoord;
+    juce::Component::SafePointer<PatchBrowser> safe (this);
+
+    auto schedulePendingRebuild = [coord, safe]
+    {
+        if (coord == nullptr || ! coord->alive.load() || ! coord->pending.exchange (false))
+            return;
+        juce::MessageManager::callAsync ([safe, coord]
+        {
+            if (coord != nullptr && coord->alive.load() && safe != nullptr)
+                safe->rebuildFiltered();
+        });
+    };
+
+    // Small libraries: stay on the message thread (no thread hop flicker).
+    if (allSnap->size() < 4000)
+    {
+        const auto* recentPtr = needRecent ? &recentIds : nullptr;
+        const TagStore* tagsPtr = tagSnap.has_value() ? &*tagSnap : nullptr;
+        auto filtered = BrowserList::filterForBrowser (*allSnap, scope, q, favSnap, tagsPtr, recentPtr);
+        auto indices = std::move (filtered.voiceIndices);
+        TagDisplayFn tagsOf;
+        if (tagSnap.has_value())
+        {
+            tagsOf = [&tagSnap] (const PatchMeta& e) -> const std::string&
+            {
+                return tagSnap->displayJoined (e.contentId);
+            };
+        }
+        BrowserList::applyColumnSort (*allSnap, indices, col, fwd, grouping, &favSnap, tagsOf);
+        if (hideDupes)
+            indices = LibraryFilter::keepFirstByContentId (*allSnap, std::move (indices));
+        auto nextRows = BrowserList::buildRows (*allSnap, indices, grouping);
+        applyRebuildResult (jobGen, std::move (nextRows), filtered.stats, std::move (keepSelected));
+        schedulePendingRebuild();
+        return;
+    }
+
+    if (coord == nullptr)
+        return;
+
+    coord->pending = true;
+    if (coord->running.exchange (true))
+        return;
+
+    coord->pending = false;
+
+    rebuildWorker = std::thread ([coord,
+                                  safe,
+                                  jobGen,
+                                  allSnap,
+                                  q,
+                                  scope,
+                                  grouping,
+                                  hideDupes,
+                                  col,
+                                  fwd,
+                                  favSnap = std::move (favSnap),
+                                  tagSnap = std::move (tagSnap),
+                                  recentIds,
+                                  needRecent,
+                                  keepSelected = std::move (keepSelected)]() mutable
+    {
+        struct RunningGuard
+        {
+            std::shared_ptr<RebuildCoordinator> c;
+            ~RunningGuard()
+            {
+                if (c != nullptr)
+                    c->running = false;
+            }
+        } guard { coord };
+
+        if (coord == nullptr || ! coord->alive.load())
+            return;
+
+        const auto* recentPtr = needRecent ? &recentIds : nullptr;
+        const TagStore* tagsPtr = tagSnap.has_value() ? &*tagSnap : nullptr;
+        auto filtered = BrowserList::filterForBrowser (*allSnap, scope, q, favSnap, tagsPtr, recentPtr);
+        auto indices = std::move (filtered.voiceIndices);
+        TagDisplayFn tagsOf;
+        if (tagSnap.has_value())
+        {
+            tagsOf = [&tagSnap] (const PatchMeta& e) -> const std::string&
+            {
+                return tagSnap->displayJoined (e.contentId);
+            };
+        }
+        BrowserList::applyColumnSort (*allSnap, indices, col, fwd, grouping, &favSnap, tagsOf);
+        if (hideDupes)
+            indices = LibraryFilter::keepFirstByContentId (*allSnap, std::move (indices));
+        auto nextRows = BrowserList::buildRows (*allSnap, indices, grouping);
+        auto stats = filtered.stats;
+
+        juce::MessageManager::callAsync ([coord, safe, jobGen, nextRows = std::move (nextRows), stats,
+                                          keepSelected = std::move (keepSelected)]() mutable
+        {
+            if (coord == nullptr || ! coord->alive.load())
+                return;
+            if (safe != nullptr)
+                safe->applyRebuildResult (jobGen, std::move (nextRows), stats, std::move (keepSelected));
+            if (coord->alive.load() && coord->pending.exchange (false))
+            {
+                juce::MessageManager::callAsync ([safe, coord]
+                {
+                    if (coord != nullptr && coord->alive.load() && safe != nullptr)
+                        safe->rebuildFiltered();
+                });
+            }
+        });
+    });
 }
 
 void PatchBrowser::updateStickyHeader()
@@ -1100,13 +1070,13 @@ juce::var PatchBrowser::getDragSourceDescription (const juce::SparseSet<int>& ro
     return juce::var ("fmlib-voice");
 }
 
-void PatchBrowser::loadRow (int row, bool loadBank)
+void PatchBrowser::requestLoad (int row, bool loadBank, LoadSource source)
 {
     if (! juce::isPositiveAndBelow (row, static_cast<int> (rows.size())) || ! onLoad)
         return;
     if (rows[static_cast<size_t> (row)].kind != BrowserRowKind::voice)
         return;
-    if (! loadBank && row == lastSentRow)
+    if (source == LoadSource::selectionChange && ! loadBank && row == lastSentRow)
         return;
     auto entry = resolveEntry (rows[static_cast<size_t> (row)].meta);
     if (! entry.has_value())
@@ -1114,6 +1084,11 @@ void PatchBrowser::loadRow (int row, bool loadBank)
     lastSentRow = row;
     onLoad (*entry, loadBank);
     updateStickyHeader();
+}
+
+void PatchBrowser::mouseDown (const juce::MouseEvent&)
+{
+    selectedRowBeforeClick = table.getSelectedRow();
 }
 
 void PatchBrowser::selectedRowsChanged (int lastRowSelected)
@@ -1132,15 +1107,7 @@ void PatchBrowser::selectedRowsChanged (int lastRowSelected)
             table.selectRow (next, false, true);
         return;
     }
-    loadRow (lastRowSelected, false);
-    // Mouse clicks also fire cellClicked after selection; skip the duplicate send there.
-    skipRedundantCellLoad = true;
-    juce::Component::SafePointer<PatchBrowser> safe (this);
-    juce::MessageManager::callAsync ([safe]
-    {
-        if (safe != nullptr)
-            safe->skipRedundantCellLoad = false;
-    });
+    requestLoad (lastRowSelected, false, LoadSource::selectionChange);
 }
 
 void PatchBrowser::toggleTagInSearch (const std::string& tagName, LibraryFilter::TagChipCombine combine)
@@ -1515,14 +1482,12 @@ void PatchBrowser::cellClicked (int row, int columnId, const juce::MouseEvent& e
 
     if (row == table.getSelectedRow())
     {
-        // Re-click already-selected row: re-send. Skip if selectedRowsChanged just loaded this click.
-        if (skipRedundantCellLoad)
+        // New selection: selectedRowsChanged already loaded. Re-click same row: re-send.
+        if (selectedRowBeforeClick == row)
         {
-            skipRedundantCellLoad = false;
-            return;
+            lastSentRow = -1;
+            requestLoad (row, false, LoadSource::reclick);
         }
-        lastSentRow = -1;
-        loadRow (row, false);
     }
 }
 
@@ -1534,10 +1499,10 @@ void PatchBrowser::cellDoubleClicked (int row, int, const juce::MouseEvent&)
     if (rows[static_cast<size_t> (row)].kind == BrowserRowKind::sectionHeader)
     {
         if (row + 1 < static_cast<int> (rows.size()))
-            loadRow (row + 1, true);
+            requestLoad (row + 1, true, LoadSource::bankLoad);
         return;
     }
-    loadRow (row, true);
+    requestLoad (row, true, LoadSource::bankLoad);
 }
 
 } // namespace fmlib

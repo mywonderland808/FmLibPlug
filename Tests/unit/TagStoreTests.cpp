@@ -83,7 +83,7 @@ TEST_CASE ("LibraryFilter tag token", "[library][filter][tags]")
     TagStore tags;
     tags.addTag (1, "brass");
     FavoritesStore favs;
-    std::vector<PatchEntry> all (1);
+    std::vector<PatchMeta> all (1);
     all[0].contentId = 1;
     all[0].voiceName = "Horn";
     all[0].refreshSearchCache();
@@ -92,8 +92,8 @@ TEST_CASE ("LibraryFilter tag token", "[library][filter][tags]")
     REQUIRE_FALSE (q.orGroups.empty());
     REQUIRE (q.orGroups[0].atoms[0].kind == LibraryFilterAtom::Kind::tag);
     REQUIRE (q.orGroups[0].atoms[0].value == "brass");
-    REQUIRE (LibraryFilter::apply (all, q, favs, &tags).size() == 1);
-    REQUIRE (LibraryFilter::apply (all, q, favs, nullptr).empty());
+    REQUIRE (LibraryFilter::matchingIndices (all, q, favs, &tags).size() == 1);
+    REQUIRE (LibraryFilter::matchingIndices (all, q, favs, nullptr).empty());
 }
 
 TEST_CASE ("LibraryFilter AND OR combinations", "[library][filter]")
@@ -103,7 +103,7 @@ TEST_CASE ("LibraryFilter AND OR combinations", "[library][filter]")
     tags.addTag (1, "dark");
     tags.addTag (2, "pad");
     FavoritesStore favs;
-    std::vector<PatchEntry> all (2);
+    std::vector<PatchMeta> all (2);
     all[0].contentId = 1;
     all[0].voiceName = "DarkBass";
     all[0].refreshSearchCache();
@@ -113,15 +113,16 @@ TEST_CASE ("LibraryFilter AND OR combinations", "[library][filter]")
 
     {
         const auto q = LibraryFilter::parse ("tag:bass AND dark", false);
-        REQUIRE (LibraryFilter::apply (all, q, favs, &tags).size() == 1);
-        REQUIRE (LibraryFilter::apply (all, q, favs, &tags).front().contentId == 1);
+        const auto idx = LibraryFilter::matchingIndices (all, q, favs, &tags);
+        REQUIRE (idx.size() == 1);
+        REQUIRE (all[static_cast<size_t> (idx.front())].contentId == 1);
     }
     {
         const auto q = LibraryFilter::parse ("tag:bass OR tag:pad", false);
-        REQUIRE (LibraryFilter::apply (all, q, favs, &tags).size() == 2);
+        REQUIRE (LibraryFilter::matchingIndices (all, q, favs, &tags).size() == 2);
     }
     {
         const auto q = LibraryFilter::parse ("tag:bass AND tag:pad", false);
-        REQUIRE (LibraryFilter::apply (all, q, favs, &tags).empty());
+        REQUIRE (LibraryFilter::matchingIndices (all, q, favs, &tags).empty());
     }
 }

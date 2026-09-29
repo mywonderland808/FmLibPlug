@@ -5,6 +5,7 @@
 #include "library/PatchEntry.h"
 #include "library/TagStore.h"
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <string>
 #include <unordered_set>
@@ -41,7 +42,8 @@ struct BrowserStats
 struct BrowserFilterResult
 {
     BrowserStats stats;
-    std::vector<PatchEntry> voices;
+    /** Indices into the `all` vector passed to filterForBrowser (no PatchMeta copies). */
+    std::vector<int> voiceIndices;
 };
 
 /** Which voices the patch browser includes. */
@@ -51,25 +53,50 @@ enum class BrowserScope
     allVoices      // every voice, flat
 };
 
+/** Optional joined-tags string for column sort (UI supplies TagStore lookup). */
+using TagDisplayFn = std::function<const std::string&(const PatchMeta&)>;
+
 /** Pure list helpers for bank-aware browsing (Catch2-tested). */
 class BrowserList
 {
 public:
-    static std::vector<PatchEntry> sortGrouped (std::vector<PatchEntry> entries);
-    /** Copies PatchMeta into voice rows (headers store path/label only; no VoiceData). */
-    static std::vector<BrowserRow> buildRows (std::vector<PatchEntry> voices, bool groupByBank);
+    static std::vector<int> sortGroupedIndices (const std::vector<PatchMeta>& all,
+                                                std::vector<int> indices);
+
+    /** Copies PatchMeta into voice rows (headers store path/label only). */
+    static std::vector<BrowserRow> buildRows (const std::vector<PatchMeta>& all,
+                                              const std::vector<int>& voiceIndices,
+                                              bool groupByBank);
 
     /**
      * Scope by BrowserScope, count dupes, apply search filter.
-     * Captures totalInScope before moving scoped entries into apply (regression: must not read size after move).
+     * Returns indices into `all` (no PatchMeta / VoiceData copies).
      * Does not hide duplicates — call keepFirstByContentId after sorting so the kept voice matches sort order.
      */
-    static BrowserFilterResult filterForBrowser (const std::vector<PatchEntry>& all,
+    static BrowserFilterResult filterForBrowser (const std::vector<PatchMeta>& all,
                                                  BrowserScope scope,
                                                  const LibraryFilterQuery& query,
                                                  const FavoritesStore& favorites,
                                                  const TagStore* tags = nullptr,
                                                  const std::unordered_set<uint64_t>* recentIds = nullptr);
+
+    /**
+     * Column-aware compare: negative if a < b, positive if a > b, 0 if equal.
+     * sortColumnId matches TableListBox column ids (1=fav, 2=name, 3=file, 4=folder, 5=slot, 6=tags).
+     */
+    static int compareMetas (const PatchMeta& a, const PatchMeta& b,
+                             int sortColumnId, bool sortForwards,
+                             bool aFavorite, bool bFavorite,
+                             const TagDisplayFn& tagsOf = {});
+
+    /** Stable-sort `indices` in place (optionally keeping same-bank voices contiguous). */
+    static void applyColumnSort (const std::vector<PatchMeta>& all,
+                                 std::vector<int>& indices,
+                                 int sortColumnId,
+                                 bool sortForwards,
+                                 bool keepBankGroups,
+                                 const FavoritesStore* favorites = nullptr,
+                                 const TagDisplayFn& tagsOf = {});
 
     static bool isBankFileVoice (const PatchMeta& e) { return fmlib::isBankFileVoice (e); }
     static int countVoiceRows (const std::vector<BrowserRow>& rows);

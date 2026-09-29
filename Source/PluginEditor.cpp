@@ -160,6 +160,11 @@ FmLibPlugAudioProcessorEditor::FmLibPlugAudioProcessorEditor (FmLibPlugAudioProc
         handleLibraryVoiceLoad (e, loadBank);
     });
 
+    browser.setResolveCallback ([this] (const fmlib::PatchMeta& m) -> std::optional<fmlib::PatchEntry>
+    {
+        return plugin.library.resolveMeta (m);
+    });
+
     browser.setFavoriteToggleCallback ([this] (uint64_t id)
     {
         plugin.favorites.toggle (id);
@@ -983,8 +988,16 @@ void FmLibPlugAudioProcessorEditor::dragOperationEnded (const juce::DragAndDropT
 
 void FmLibPlugAudioProcessorEditor::refreshLibraryView()
 {
+    // Avoid a pointless full populate while the first scan is still empty — the
+    // library listener will call us again when entries arrive.
+    if (plugin.library.isScanning() && plugin.library.getEntryCount() == 0)
+    {
+        setMidiStatus ("Scanning...");
+        return;
+    }
+
     browser.setFavoritesOnly (plugin.prefs.favoritesOnly);
-    auto entries = plugin.library.getEntriesCopy();
+    auto entries = plugin.library.getMetaCopy();
     browser.setEntries (std::move (entries), &plugin.favorites, &plugin.tags, &plugin.recent);
     browser.setBankFileView (plugin.prefs.bankFileView);
     browser.setShowFileColumns (plugin.prefs.showFileColumns);

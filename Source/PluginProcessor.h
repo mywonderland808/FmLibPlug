@@ -115,6 +115,7 @@ public:
     bool hasSoundingNotes() const;
     void autoTagLibrary (std::function<void()> onDone = {});
     juce::File tagsFile() const;
+    juce::File libraryCacheFile() const;
     juce::File morphPresetsFile() const;
 
     /** Live morph snapshot owned by the processor (corners, locks, names). */

@@ -145,7 +145,7 @@ LibraryFilterAndGroup parseAndGroup (const std::string& clause)
 }
 
 bool atomMatches (const LibraryFilterAtom& atom,
-                  const PatchEntry& e,
+                  const PatchMeta& e,
                   const FavoritesStore& favorites,
                   const TagStore* tags,
                   const std::unordered_set<uint64_t>* dupeIds,
@@ -179,7 +179,7 @@ bool atomMatches (const LibraryFilterAtom& atom,
 }
 
 bool groupMatches (const LibraryFilterAndGroup& g,
-                   const PatchEntry& e,
+                   const PatchMeta& e,
                    const FavoritesStore& favorites,
                    const TagStore* tags,
                    const std::unordered_set<uint64_t>* dupeIds,
@@ -226,32 +226,58 @@ LibraryFilterQuery LibraryFilter::parse (const std::string& raw, bool favoritesT
     return q;
 }
 
-std::vector<PatchEntry> LibraryFilter::apply (std::vector<PatchEntry> all,
-                                              const LibraryFilterQuery& query,
-                                              const FavoritesStore& favorites,
-                                              const TagStore* tags,
-                                              const std::unordered_set<uint64_t>* recentIds)
+std::vector<int> LibraryFilter::matchingIndices (const std::vector<PatchMeta>& all,
+                                                 const LibraryFilterQuery& query,
+                                                 const FavoritesStore& favorites,
+                                                 const TagStore* tags,
+                                                 const std::unordered_set<uint64_t>* recentIds,
+                                                 const std::vector<int>* candidates)
 {
+    auto appendAllCandidates = [&] (std::vector<int>& out)
+    {
+        if (candidates != nullptr)
+            out = *candidates;
+        else
+        {
+            out.reserve (all.size());
+            for (int i = 0; i < static_cast<int> (all.size()); ++i)
+                out.push_back (i);
+        }
+    };
+
+    std::vector<int> out;
     if (query.orGroups.empty() && ! query.favoritesOnly && ! query.duplicatesOnly)
-        return all;
+    {
+        appendAllCandidates (out);
+        return out;
+    }
+
+    std::vector<int> pool;
+    appendAllCandidates (pool);
 
     std::unordered_set<uint64_t> dupeIds;
     if (query.duplicatesOnly)
     {
         std::unordered_map<uint64_t, int> counts;
-        counts.reserve (all.size());
-        for (const auto& e : all)
-            ++counts[e.contentId];
+        counts.reserve (pool.size());
+        for (int i : pool)
+        {
+            if (i < 0 || static_cast<size_t> (i) >= all.size())
+                continue;
+            ++counts[all[static_cast<size_t> (i)].contentId];
+        }
         for (const auto& [id, n] : counts)
             if (n >= 2)
                 dupeIds.insert (id);
     }
     const std::unordered_set<uint64_t>* dupePtr = query.duplicatesOnly ? &dupeIds : nullptr;
 
-    std::vector<PatchEntry> out;
-    out.reserve (all.size());
-    for (auto& e : all)
+    out.reserve (pool.size());
+    for (int i : pool)
     {
+        if (i < 0 || static_cast<size_t> (i) >= all.size())
+            continue;
+        const auto& e = all[static_cast<size_t> (i)];
         // Favorites toggle is a global AND (UI checkbox).
         if (query.favoritesOnly && ! favorites.isFavorite (e.contentId))
             continue;
@@ -271,22 +297,25 @@ std::vector<PatchEntry> LibraryFilter::apply (std::vector<PatchEntry> all,
                 continue;
         }
 
-        out.push_back (std::move (e));
+        out.push_back (i);
     }
     return out;
 }
 
-std::vector<PatchEntry> LibraryFilter::keepFirstByContentId (std::vector<PatchEntry> voices)
+std::vector<int> LibraryFilter::keepFirstByContentId (const std::vector<PatchMeta>& all,
+                                                      std::vector<int> indices)
 {
     std::unordered_set<uint64_t> seen;
-    seen.reserve (voices.size());
-    std::vector<PatchEntry> out;
-    out.reserve (voices.size());
-    for (auto& e : voices)
+    seen.reserve (indices.size());
+    std::vector<int> out;
+    out.reserve (indices.size());
+    for (int i : indices)
     {
-        if (! seen.insert (e.contentId).second)
+        if (i < 0 || static_cast<size_t> (i) >= all.size())
             continue;
-        out.push_back (std::move (e));
+        if (! seen.insert (all[static_cast<size_t> (i)].contentId).second)
+            continue;
+        out.push_back (i);
     }
     return out;
 }

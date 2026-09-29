@@ -44,10 +44,16 @@ public:
     void setBaseFolders (std::vector<std::filesystem::path> folders);
     const std::vector<std::filesystem::path>& getBaseFolders() const { return baseFolders; }
 
+    /** Optional persistent parse cache (mtime+size). Empty disables caching. */
+    void setCacheFile (std::filesystem::path path) { cacheFile = std::move (path); }
+
     void rescanAsync();
     bool isScanning() const { return scanning.load(); }
 
     std::vector<PatchEntry> getEntriesCopy() const;
+    /** Metadata only (no VoiceData) for browse UI — much cheaper than getEntriesCopy at 100k+. */
+    std::vector<PatchMeta> getMetaCopy() const;
+    int getEntryCount() const;
     int getSkippedFileCount() const { return skippedFiles.load(); }
 
     /**
@@ -62,6 +68,8 @@ public:
                                          int bankSlot) const;
     /** Resolve any voice by snapshot index (required for concatenated 1-voice files). */
     std::optional<PatchEntry> findEntryByIndex (int libraryIndex) const;
+    /** Resolve a voice from browse metadata (index first, then path/slot/contentId). */
+    std::optional<PatchEntry> resolveMeta (const PatchMeta& m) const;
 
     void addListener (Listener l);
     void clearListeners() { listeners.clear(); }
@@ -74,6 +82,7 @@ private:
     void applyEntriesUnlocked (std::vector<PatchEntry> next);
 
     std::vector<std::filesystem::path> baseFolders;
+    std::filesystem::path cacheFile;
     mutable std::mutex mutex;
     std::vector<PatchEntry> entries;
     BankPathIndex bankIndex;

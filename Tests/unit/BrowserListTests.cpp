@@ -1,43 +1,54 @@
 #include "TestHelpers.h"
 #include "library/BrowserList.h"
+#include "library/FavoritesStore.h"
 #include "library/PatchEntry.h"
 
 using namespace fmlib;
 
-static PatchEntry voiceAt (const std::string& path, int slot, const std::string& name)
+static PatchMeta voiceAt (const std::string& path, int slot, const std::string& name)
 {
-    PatchEntry e;
+    PatchMeta e;
     e.absolutePath = path;
     e.fileName = std::filesystem::path (path).filename().string();
     e.bankSlot = slot;
     e.voiceName = name;
     e.contentId = static_cast<uint64_t> (slot) + path.size() * 1000;
+    e.refreshSearchCache();
     return e;
 }
 
-TEST_CASE ("BrowserList sortGrouped orders by path then slot", "[library][browser]")
+static std::vector<int> allIndices (const std::vector<PatchMeta>& all)
 {
-    std::vector<PatchEntry> in {
+    std::vector<int> idx (all.size());
+    for (int i = 0; i < static_cast<int> (all.size()); ++i)
+        idx[static_cast<size_t> (i)] = i;
+    return idx;
+}
+
+TEST_CASE ("BrowserList sortGroupedIndices orders by path then slot", "[library][browser]")
+{
+    std::vector<PatchMeta> in {
         voiceAt ("/b/bank.syx", 2, "B2"),
         voiceAt ("/a/bank.syx", 2, "A2"),
         voiceAt ("/a/bank.syx", 1, "A1"),
         voiceAt ("/b/bank.syx", 1, "B1"),
     };
-    const auto out = BrowserList::sortGrouped (in);
-    REQUIRE (out[0].voiceName == "A1");
-    REQUIRE (out[1].voiceName == "A2");
-    REQUIRE (out[2].voiceName == "B1");
-    REQUIRE (out[3].voiceName == "B2");
+    const auto out = BrowserList::sortGroupedIndices (in, allIndices (in));
+    REQUIRE (in[static_cast<size_t> (out[0])].voiceName == "A1");
+    REQUIRE (in[static_cast<size_t> (out[1])].voiceName == "A2");
+    REQUIRE (in[static_cast<size_t> (out[2])].voiceName == "B1");
+    REQUIRE (in[static_cast<size_t> (out[3])].voiceName == "B2");
 }
 
 TEST_CASE ("BrowserList buildRows inserts section headers", "[library][browser]")
 {
-    auto voices = BrowserList::sortGrouped ({
+    std::vector<PatchMeta> voices {
         voiceAt ("/a/a.syx", 1, "A1"),
         voiceAt ("/a/a.syx", 2, "A2"),
         voiceAt ("/b/b.syx", 1, "B1"),
-    });
-    const auto rows = BrowserList::buildRows (std::move (voices), true);
+    };
+    auto idx = BrowserList::sortGroupedIndices (voices, allIndices (voices));
+    const auto rows = BrowserList::buildRows (voices, idx, true);
     REQUIRE (rows.size() == 5);
     REQUIRE (rows[0].kind == BrowserRowKind::sectionHeader);
     REQUIRE (rows[0].meta.voiceName.empty());
@@ -48,11 +59,12 @@ TEST_CASE ("BrowserList buildRows inserts section headers", "[library][browser]"
 
 TEST_CASE ("BrowserList buildRows flat has no headers", "[library][browser]")
 {
-    auto voices = BrowserList::sortGrouped ({
+    std::vector<PatchMeta> voices {
         voiceAt ("/a/a.syx", 1, "A1"),
         voiceAt ("/b/b.syx", 1, "B1"),
-    });
-    const auto rows = BrowserList::buildRows (std::move (voices), false);
+    };
+    auto idx = BrowserList::sortGroupedIndices (voices, allIndices (voices));
+    const auto rows = BrowserList::buildRows (voices, idx, false);
     REQUIRE (rows.size() == 2);
     REQUIRE (rows[0].kind == BrowserRowKind::voice);
     REQUIRE (rows[1].kind == BrowserRowKind::voice);
@@ -60,13 +72,14 @@ TEST_CASE ("BrowserList buildRows flat has no headers", "[library][browser]")
 
 TEST_CASE ("BrowserList prev next bank jumps", "[library][browser]")
 {
-    auto voices = BrowserList::sortGrouped ({
+    std::vector<PatchMeta> voices {
         voiceAt ("/a/a.syx", 1, "A1"),
         voiceAt ("/a/a.syx", 2, "A2"),
         voiceAt ("/b/b.syx", 1, "B1"),
         voiceAt ("/c/c.syx", 1, "C1"),
-    });
-    const auto rows = BrowserList::buildRows (std::move (voices), true);
+    };
+    auto idx = BrowserList::sortGroupedIndices (voices, allIndices (voices));
+    const auto rows = BrowserList::buildRows (voices, idx, true);
     // rows: H A1 A2 H B1 H C1
     REQUIRE_FALSE (BrowserList::prevBankRow (rows, 1).has_value());
     const auto next = BrowserList::nextBankRow (rows, 1);
@@ -181,12 +194,53 @@ TEST_CASE ("BrowserList non-letter names share one A-Z jump group", "[library][b
     REQUIRE (*prevOther == 0);
 }
 
-TEST_CASE ("BrowserList sortGrouped treats missing slot as last", "[library][browser]")
+TEST_CASE ("BrowserList sortGroupedIndices treats missing slot as last", "[library][browser]")
 {
-    auto out = BrowserList::sortGrouped ({
+    std::vector<PatchMeta> in {
         voiceAt ("/a/a.syx", 0, "NoSlot"),
         voiceAt ("/a/a.syx", 1, "Slot1"),
-    });
-    REQUIRE (out[0].voiceName == "Slot1");
-    REQUIRE (out[1].voiceName == "NoSlot");
+    };
+    auto out = BrowserList::sortGroupedIndices (in, allIndices (in));
+    REQUIRE (in[static_cast<size_t> (out[0])].voiceName == "Slot1");
+    REQUIRE (in[static_cast<size_t> (out[1])].voiceName == "NoSlot");
+}
+
+TEST_CASE ("BrowserList applyColumnSort by name keeps bank groups", "[library][browser]")
+{
+    std::vector<PatchMeta> all {
+        voiceAt ("/b/b.syx", 1, "Zebra"),
+        voiceAt ("/b/b.syx", 2, "Alpha"),
+        voiceAt ("/a/a.syx", 1, "Mike"),
+        voiceAt ("/a/a.syx", 2, "Beta"),
+    };
+    for (auto& e : all)
+        e.refreshSearchCache();
+
+    auto idx = allIndices (all);
+    // Column 2 = Patch name, keep bank groups
+    BrowserList::applyColumnSort (all, idx, 2, true, true, nullptr, {});
+
+    // Banks ordered by first voice after within-bank name sort: a has Beta/Mike, b has Alpha/Zebra
+    // Alpha < Beta so bank b comes first
+    REQUIRE (all[static_cast<size_t> (idx[0])].voiceName == "Alpha");
+    REQUIRE (all[static_cast<size_t> (idx[1])].voiceName == "Zebra");
+    REQUIRE (all[static_cast<size_t> (idx[2])].voiceName == "Beta");
+    REQUIRE (all[static_cast<size_t> (idx[3])].voiceName == "Mike");
+}
+
+TEST_CASE ("BrowserList applyColumnSort flat by name", "[library][browser]")
+{
+    std::vector<PatchMeta> all {
+        voiceAt ("/b/b.syx", 1, "Zebra"),
+        voiceAt ("/a/a.syx", 1, "Alpha"),
+        voiceAt ("/c/c.syx", 1, "Mike"),
+    };
+    for (auto& e : all)
+        e.refreshSearchCache();
+
+    auto idx = allIndices (all);
+    BrowserList::applyColumnSort (all, idx, 2, true, false, nullptr, {});
+    REQUIRE (all[static_cast<size_t> (idx[0])].voiceName == "Alpha");
+    REQUIRE (all[static_cast<size_t> (idx[1])].voiceName == "Mike");
+    REQUIRE (all[static_cast<size_t> (idx[2])].voiceName == "Zebra");
 }

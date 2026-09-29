@@ -37,6 +37,17 @@ DeviceBufferPanel::DeviceBufferPanel()
     req1.setTooltip ("Get a 1-voice dump from the device.");
     req32.setTooltip ("Get a 32-voice bank dump from the device.");
     list.setTooltip ("Click a slot to load it. Drag to swap. Drop a library voice onto a slot to assign.");
+    list.addMouseListener (this, true);
+}
+
+DeviceBufferPanel::~DeviceBufferPanel()
+{
+    list.removeMouseListener (this);
+}
+
+void DeviceBufferPanel::mouseDown (const juce::MouseEvent&)
+{
+    selectedRowBeforeClick = list.getSelectedRow();
 }
 
 void DeviceBufferPanel::setBuffer (DeviceBuffer* buffer)
@@ -205,7 +216,7 @@ void DeviceBufferPanel::itemDropped (const SourceDetails& details)
     notifyDragEnded();
 }
 
-void DeviceBufferPanel::loadRow (int row)
+void DeviceBufferPanel::requestLoad (int row, LoadSource source)
 {
     if (suppressLoad)
         return;
@@ -214,7 +225,7 @@ void DeviceBufferPanel::loadRow (int row)
     const auto& voices = buf->getVoices();
     if (! juce::isPositiveAndBelow (row, static_cast<int> (voices.size())))
         return;
-    if (row == lastSentRow)
+    if (source == LoadSource::selectionChange && row == lastSentRow)
         return;
     if (voices[static_cast<size_t> (row)].voiceName == "(empty)")
         return;
@@ -250,7 +261,7 @@ void DeviceBufferPanel::Model::selectedRowsChanged (int lastRowSelected)
         return;
     if (juce::ModifierKeys::getCurrentModifiers().isPopupMenu())
         return;
-    owner->loadRow (lastRowSelected);
+    owner->requestLoad (lastRowSelected, DeviceBufferPanel::LoadSource::selectionChange);
 }
 
 void DeviceBufferPanel::Model::listBoxItemClicked (int row, const juce::MouseEvent& e)
@@ -276,10 +287,10 @@ void DeviceBufferPanel::Model::listBoxItemClicked (int row, const juce::MouseEve
     owner->list.grabKeyboardFocus();
     if (owner->onListFocused)
         owner->onListFocused();
-    if (row == owner->list.getSelectedRow())
+    if (row == owner->list.getSelectedRow() && owner->selectedRowBeforeClick == row)
     {
         owner->lastSentRow = -1;
-        owner->loadRow (row);
+        owner->requestLoad (row, DeviceBufferPanel::LoadSource::reclick);
     }
 }
 

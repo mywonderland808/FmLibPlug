@@ -7,15 +7,24 @@
 
 using namespace fmlib;
 
-static PatchEntry entryWith (const std::string& name, const std::string& file, uint64_t id)
+static PatchMeta entryWith (const std::string& name, const std::string& file, uint64_t id)
 {
-    PatchEntry e;
+    PatchMeta e;
     e.voiceName = name;
     e.fileName = file;
     e.relativePath = "folder/" + file;
     e.contentId = id;
     e.refreshSearchCache();
     return e;
+}
+
+static std::vector<PatchMeta> pick (const std::vector<PatchMeta>& all, const std::vector<int>& idx)
+{
+    std::vector<PatchMeta> out;
+    out.reserve (idx.size());
+    for (int i : idx)
+        out.push_back (all[static_cast<size_t> (i)]);
+    return out;
 }
 
 static std::string firstTextAtom (const LibraryFilterQuery& q)
@@ -56,7 +65,7 @@ TEST_CASE ("LibraryFilter apply text and favorites", "[library][filter]")
     FavoritesStore favs;
     favs.setFavorite (100, true);
 
-    std::vector<PatchEntry> all {
+    std::vector<PatchMeta> all {
         entryWith ("Brass Pad", "brass.syx", 100),
         entryWith ("Piano", "piano.syx", 200),
         entryWith ("Strings", "strings.syx", 300)
@@ -64,7 +73,7 @@ TEST_CASE ("LibraryFilter apply text and favorites", "[library][filter]")
 
     {
         const auto q = LibraryFilter::parse ("bras", false);
-        const auto out = LibraryFilter::apply (all, q, favs);
+        const auto out = pick (all, LibraryFilter::matchingIndices (all, q, favs));
         REQUIRE (out.size() == 1);
         REQUIRE (out.front().voiceName == "Brass Pad");
     }
@@ -72,14 +81,14 @@ TEST_CASE ("LibraryFilter apply text and favorites", "[library][filter]")
     {
         LibraryFilterQuery q;
         q.favoritesOnly = true;
-        const auto out = LibraryFilter::apply (all, q, favs);
+        const auto out = pick (all, LibraryFilter::matchingIndices (all, q, favs));
         REQUIRE (out.size() == 1);
         REQUIRE (out.front().contentId == 100);
     }
 
     {
         const auto q = LibraryFilter::parse ("fav:", false);
-        const auto out = LibraryFilter::apply (all, q, favs);
+        const auto out = pick (all, LibraryFilter::matchingIndices (all, q, favs));
         REQUIRE (out.size() == 1);
     }
 }
@@ -87,7 +96,7 @@ TEST_CASE ("LibraryFilter apply text and favorites", "[library][filter]")
 TEST_CASE ("LibraryFilter recent: uses recentIds", "[library][filter][recent]")
 {
     FavoritesStore favs;
-    std::vector<PatchEntry> all {
+    std::vector<PatchMeta> all {
         entryWith ("A", "a.syx", 1),
         entryWith ("B", "b.syx", 2),
         entryWith ("C", "c.syx", 3)
@@ -97,10 +106,10 @@ TEST_CASE ("LibraryFilter recent: uses recentIds", "[library][filter][recent]")
     auto q = LibraryFilter::parse ("recent:", false);
     REQUIRE (q.recentOnly);
 
-    const auto empty = LibraryFilter::apply (all, q, favs, nullptr, nullptr);
+    const auto empty = pick (all, LibraryFilter::matchingIndices (all, q, favs, nullptr, nullptr));
     REQUIRE (empty.empty());
 
-    const auto out = LibraryFilter::apply (all, q, favs, nullptr, &recent);
+    const auto out = pick (all, LibraryFilter::matchingIndices (all, q, favs, nullptr, &recent));
     REQUIRE (out.size() == 2);
     REQUIRE (out[0].contentId == 2);
     REQUIRE (out[1].contentId == 3);
@@ -108,28 +117,29 @@ TEST_CASE ("LibraryFilter recent: uses recentIds", "[library][filter][recent]")
 
 TEST_CASE ("LibraryFilter keepFirstByContentId respects input order", "[library][filter][dupes]")
 {
-    std::vector<PatchEntry> voices {
+    std::vector<PatchMeta> voices {
         entryWith ("KeepMe", "b.syx", 42),
         entryWith ("DropMe", "a.syx", 42),
         entryWith ("Other", "c.syx", 7)
     };
-    const auto out = LibraryFilter::keepFirstByContentId (std::move (voices));
-    REQUIRE (out.size() == 2);
-    REQUIRE (out[0].voiceName == "KeepMe");
-    REQUIRE (out[1].voiceName == "Other");
+    std::vector<int> idx { 0, 1, 2 };
+    const auto kept = LibraryFilter::keepFirstByContentId (voices, std::move (idx));
+    REQUIRE (kept.size() == 2);
+    REQUIRE (voices[static_cast<size_t> (kept[0])].voiceName == "KeepMe");
+    REQUIRE (voices[static_cast<size_t> (kept[1])].voiceName == "Other");
 }
 
 TEST_CASE ("LibraryFilter dupe: keeps only duplicated contentIds", "[library][filter][dupes]")
 {
     FavoritesStore favs;
-    std::vector<PatchEntry> all {
+    std::vector<PatchMeta> all {
         entryWith ("A1", "a.syx", 1),
         entryWith ("A2", "b.syx", 1),
         entryWith ("Solo", "c.syx", 2)
     };
     const auto q = LibraryFilter::parse ("dupe:", false);
     REQUIRE (q.duplicatesOnly);
-    const auto out = LibraryFilter::apply (std::move (all), q, favs);
+    const auto out = pick (all, LibraryFilter::matchingIndices (all, q, favs));
     REQUIRE (out.size() == 2);
     REQUIRE (out[0].contentId == 1);
     REQUIRE (out[1].contentId == 1);
@@ -139,7 +149,7 @@ TEST_CASE ("LibraryFilter dupe: OR fav: is union not intersection", "[library][f
 {
     FavoritesStore favs;
     favs.setFavorite (2, true);
-    std::vector<PatchEntry> all {
+    std::vector<PatchMeta> all {
         entryWith ("A1", "a.syx", 1),
         entryWith ("A2", "b.syx", 1),
         entryWith ("FavSolo", "c.syx", 2),
@@ -148,7 +158,7 @@ TEST_CASE ("LibraryFilter dupe: OR fav: is union not intersection", "[library][f
     const auto q = LibraryFilter::parse ("dupe: OR fav:", false);
     REQUIRE (q.duplicatesOnly);
     REQUIRE_FALSE (q.favoritesOnly);
-    const auto out = LibraryFilter::apply (std::move (all), q, favs);
+    const auto out = pick (all, LibraryFilter::matchingIndices (all, q, favs));
     REQUIRE (out.size() == 3);
     REQUIRE (out[0].contentId == 1);
     REQUIRE (out[1].contentId == 1);
@@ -162,7 +172,7 @@ TEST_CASE ("LibraryFilter uppercase AND/OR only; trailing ops ignored", "[librar
     tags.addTag (1, "bass");
     tags.addTag (2, "analog");
     tags.addTag (3, "hard");
-    std::vector<PatchEntry> all {
+    std::vector<PatchMeta> all {
         entryWith ("BassVoice", "a.syx", 1),
         entryWith ("AnalogVoice", "b.syx", 2),
         entryWith ("HardVoice", "c.syx", 3)
@@ -171,14 +181,14 @@ TEST_CASE ("LibraryFilter uppercase AND/OR only; trailing ops ignored", "[librar
     {
         const auto q = LibraryFilter::parse ("tag:bass OR", false);
         REQUIRE (q.orGroups.size() == 1);
-        const auto out = LibraryFilter::apply (all, q, favs, &tags);
+        const auto out = pick (all, LibraryFilter::matchingIndices (all, q, favs, &tags));
         REQUIRE (out.size() == 1);
         REQUIRE (out.front().contentId == 1);
     }
     {
         const auto q = LibraryFilter::parse ("tag:bass AND", false);
         REQUIRE (q.orGroups.size() == 1);
-        const auto out = LibraryFilter::apply (all, q, favs, &tags);
+        const auto out = pick (all, LibraryFilter::matchingIndices (all, q, favs, &tags));
         REQUIRE (out.size() == 1);
         REQUIRE (out.front().contentId == 1);
     }
@@ -186,7 +196,7 @@ TEST_CASE ("LibraryFilter uppercase AND/OR only; trailing ops ignored", "[librar
         // Stray AND after OR must not become a text search for "and".
         const auto q = LibraryFilter::parse ("tag:bass OR AND tag:analog", false);
         REQUIRE (q.orGroups.size() == 2);
-        const auto out = LibraryFilter::apply (all, q, favs, &tags);
+        const auto out = pick (all, LibraryFilter::matchingIndices (all, q, favs, &tags));
         REQUIRE (out.size() == 2);
         REQUIRE (out[0].contentId == 1);
         REQUIRE (out[1].contentId == 2);
@@ -254,44 +264,44 @@ TEST_CASE ("LibraryFilter :singles matches 1-voice SysEx rows", "[library][filte
     TagStore tags;
     tags.addTag (1, "single"); // a user tag named single is unrelated
 
-    PatchEntry bank;
+    PatchMeta bank;
     bank.voiceName = "FromBank";
     bank.fileName = "bank.syx";
     bank.bankSlot = 3;
     bank.contentId = 1;
     bank.refreshSearchCache();
 
-    PatchEntry solo;
+    PatchMeta solo;
     solo.voiceName = "Solo";
     solo.fileName = "solo.syx";
     solo.bankSlot = -1;
     solo.contentId = 2;
     solo.refreshSearchCache();
 
-    PatchEntry concat;
+    PatchMeta concat;
     concat.voiceName = "PackedIn";
     concat.fileName = "many-singles.syx";
     concat.bankSlot = -1;
     concat.contentId = 3;
     concat.refreshSearchCache();
 
-    std::vector<PatchEntry> all { bank, solo, concat };
+    std::vector<PatchMeta> all { bank, solo, concat };
 
     const auto q = LibraryFilter::parse (":singles", false);
     REQUIRE (q.hasSingles());
     REQUIRE_FALSE (q.hasTag ("single"));
     REQUIRE (q.orGroups[0].atoms[0].kind == LibraryFilterAtom::Kind::singles);
 
-    const auto out = LibraryFilter::apply (all, q, favs, &tags);
+    const auto out = pick (all, LibraryFilter::matchingIndices (all, q, favs, &tags));
     REQUIRE (out.size() == 2);
     REQUIRE (out[0].voiceName == "Solo");
     REQUIRE (out[1].voiceName == "PackedIn");
-    REQUIRE (LibraryFilter::apply (all, q, favs, nullptr).size() == 2);
+    REQUIRE (pick (all, LibraryFilter::matchingIndices (all, q, favs, nullptr)).size() == 2);
 
     REQUIRE (LibraryFilter::parse ("singles:", false).hasSingles());
     REQUIRE (LibraryFilter::parse (":single", false).hasSingles());
     REQUIRE_FALSE (LibraryFilter::parse ("tag:single", false).hasSingles());
-    REQUIRE (LibraryFilter::apply (all, LibraryFilter::parse ("tag:single", false), favs, &tags).size() == 1);
-    REQUIRE (LibraryFilter::apply (all, LibraryFilter::parse ("tag:single", false), favs, &tags).front().voiceName
+    REQUIRE (pick (all, LibraryFilter::matchingIndices (all, LibraryFilter::parse ("tag:single", false), favs, &tags)).size() == 1);
+    REQUIRE (pick (all, LibraryFilter::matchingIndices (all, LibraryFilter::parse ("tag:single", false), favs, &tags)).front().voiceName
              == "FromBank");
 }
