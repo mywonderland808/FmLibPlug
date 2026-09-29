@@ -39,6 +39,15 @@ TEST_CASE ("MorphHostState motion mapping and clamps", "[host][morph]")
     REQUIRE (isEdgeLfoMotion (3));
     REQUIRE_FALSE (isEdgeLfoMotion (0));
 
+    // Pad commit / host pad automation while Off → update name.
+    REQUIRE (morphShouldUpdateLiveName (static_cast<int> (MorphMotionMode::off), true));
+    // Mid-drag / lock emit (no position commit) → freeze.
+    REQUIRE_FALSE (morphShouldUpdateLiveName (static_cast<int> (MorphMotionMode::off), false));
+    // Edge LFO / Note morph never rename, even on force-commit jumps.
+    REQUIRE_FALSE (morphShouldUpdateLiveName (static_cast<int> (MorphMotionMode::edgeLfo), true));
+    REQUIRE_FALSE (morphShouldUpdateLiveName (static_cast<int> (MorphMotionMode::random), true));
+    REQUIRE_FALSE (morphShouldUpdateLiveName (static_cast<int> (MorphMotionMode::edges), true));
+
     REQUIRE (morphPositionMatchesLastPluginWrite (0.5f, 0.25f, 0.5f, 0.25f));
     REQUIRE_FALSE (morphPositionMatchesLastPluginWrite (0.5f, 0.25f, 0.51f, 0.25f));
 

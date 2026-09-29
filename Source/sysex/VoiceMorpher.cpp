@@ -140,4 +140,30 @@ VoiceData VoiceMorpher::morph4 (const VoiceData& a, const VoiceData& b, const Vo
     return out;
 }
 
+VoiceNameBytes VoiceMorpher::nameBytesFromVoice (const VoiceData& voice)
+{
+    VoiceNameBytes name {};
+    for (int i = 0; i < kNameLength; ++i)
+        name[static_cast<size_t> (i)] = voice[static_cast<size_t> (145 + i)] & 0x7f;
+    return name;
+}
+
+void VoiceMorpher::applyNameBytes (VoiceData& voice, const VoiceNameBytes& name)
+{
+    for (int i = 0; i < kNameLength; ++i)
+        voice[static_cast<size_t> (145 + i)] = name[static_cast<size_t> (i)] & 0x7f;
+}
+
+void VoiceMorpher::applyLiveNamePolicy (VoiceData& voice, VoiceNameBytes& frozen, bool& frozenValid,
+                                        bool updateName)
+{
+    if (updateName || ! frozenValid)
+    {
+        frozen = nameBytesFromVoice (voice);
+        frozenValid = true;
+        return;
+    }
+    applyNameBytes (voice, frozen);
+}
+
 } // namespace fmlib

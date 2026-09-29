@@ -19,6 +19,7 @@ constexpr uint8_t kFormatVoiceBank = 0x09;
 
 using VoiceData = std::array<uint8_t, kVoiceDataBytes>;
 using PackedVoice = std::array<uint8_t, kPackedVoiceBytes>;
+using VoiceNameBytes = std::array<uint8_t, kNameLength>;
 
 inline uint8_t yamahaChecksum (const uint8_t* data, size_t size)
 {

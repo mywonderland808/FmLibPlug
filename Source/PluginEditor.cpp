@@ -127,8 +127,9 @@ FmLibPlugAudioProcessorEditor::FmLibPlugAudioProcessorEditor (FmLibPlugAudioProc
     morpher.onLockRefHostWrite = [this] (float x, float y, bool begin, bool end)
     {
         plugin.setLockRefPosition (x, y, begin, end);
+        // Lock-ref release updates locked params only — do not rewrite morph LCD name.
         if (end)
-            plugin.applyLiveMorph (false, true);
+            plugin.applyLiveMorph (false, true, false);
     };
     morpher.onCornersCleared = [this] { plugin.clearLiveCorners(); };
 
@@ -246,12 +247,15 @@ FmLibPlugAudioProcessorEditor::FmLibPlugAudioProcessorEditor (FmLibPlugAudioProc
         applyAuditionHoldAction (auditionHoldInputs.setButtonDown (auditionBtn.isDown()));
     };
 
+    // Panel emitMorph builds a VoiceData for equality checks; live MIDI always goes through
+    // applyLiveMorph so Edge/Note name freeze and MorphTransport policy stay authoritative.
     morpher.onMorph = [this] (const fmlib::VoiceData& v, bool dragEmit, bool liveAllParams)
     {
         juce::ignoreUnused (v);
         if (liveAllParams)
             plugin.midi.cancelMorphReleaseGuard();
-        plugin.applyLiveMorph (dragEmit, liveAllParams);
+        // Lock / lock-ref / corner emits: params only — never commit ABCD-XX:YY.
+        plugin.applyLiveMorph (dragEmit, liveAllParams, false);
     };
     // Driving the pad by hand outranks the release hold: a click you asked for beats a
     // pad that ignores you for the length of the hold.
@@ -621,7 +625,7 @@ void FmLibPlugAudioProcessorEditor::resumeMorphPerformance()
     if (morpher.allCornersReady())
     {
         plugin.midi.cancelMorphReleaseGuard();
-        plugin.applyLiveMorph (false, false);
+        plugin.applyLiveMorph (false, false, false);
         morpher.setEgressPaused (false);
         setMidiStatus ("Morph resumed");
     }

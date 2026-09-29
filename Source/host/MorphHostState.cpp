@@ -110,6 +110,11 @@ bool isEdgeLfoMotion (int motionChoice)
     return motionChoice == static_cast<int> (MorphMotionMode::edgeLfo);
 }
 
+bool morphShouldUpdateLiveName (int motionChoice, bool positionCommit)
+{
+    return positionCommit && ! isMorphMotionActive (motionChoice);
+}
+
 bool morphPositionMatchesLastPluginWrite (float x, float y, float lastX, float lastY)
 {
     constexpr float kEpsilon = 1.0e-5f;

@@ -241,7 +241,7 @@ void FmLibPlugAudioProcessor::restoreSessionFromState (const fmlib::PluginSessio
     applyMorphMotionMode (getMorphMotionChoice());
 
     if (allLiveCornersReady())
-        applyLiveMorph (false, false);
+        applyLiveMorph (false, false, true);
 
     if (notifyUi)
         notifyMorphUiSync();
@@ -323,6 +323,7 @@ void FmLibPlugAudioProcessor::setLiveCorner (int corner0to3, const fmlib::VoiceD
     voice = v;
     *n = name.toStdString();
     liveCornerSet[corner0to3] = true;
+    frozenMorphNameValid = false;
     midi.invalidateMorphBaseline();
 }
 
@@ -337,6 +338,7 @@ void FmLibPlugAudioProcessor::clearLiveCorners()
     liveMorph.nameC.clear();
     liveMorph.nameD.clear();
     liveCornerSet[0] = liveCornerSet[1] = liveCornerSet[2] = liveCornerSet[3] = false;
+    frozenMorphNameValid = false;
     midi.invalidateMorphBaseline();
 }
 
@@ -344,6 +346,7 @@ void FmLibPlugAudioProcessor::applyLiveMorphPreset (const fmlib::MorphPreset& p)
 {
     liveMorph = p;
     liveCornerSet[0] = liveCornerSet[1] = liveCornerSet[2] = liveCornerSet[3] = true;
+    frozenMorphNameValid = false;
     pushLiveMorphToApvts();
     morphLastLfoStep = -1;
     morphLfoPhase = 0.0f;
@@ -456,7 +459,8 @@ void FmLibPlugAudioProcessor::setMorphPosition (float x, float y, bool beginGest
     morphSelfWriteDepth.fetch_sub (1, std::memory_order_relaxed);
     liveMorph.posX = cx;
     liveMorph.posY = cy;
-    applyLiveMorph (! endGesture, false);
+    applyLiveMorph (! endGesture, false,
+                    fmlib::morphShouldUpdateLiveName (getMorphMotionChoice(), endGesture));
 }
 
 void FmLibPlugAudioProcessor::publishMorphMotionPosition (float x, float y, bool dragEmit)
@@ -474,10 +478,11 @@ void FmLibPlugAudioProcessor::publishMorphMotionPosition (float x, float y, bool
 
     liveMorph.posX = cx;
     liveMorph.posY = cy;
+    // Edge LFO / Note morph never rewrite the LCD name.
     if (fmlib::isEdgeLfoMotion (getMorphMotionChoice()))
-        requestApplyLiveMorph (true, false);
+        requestApplyLiveMorph (true, false, false);
     else
-        applyLiveMorph (dragEmit, false);
+        applyLiveMorph (dragEmit, false, false);
     notifyMorphUiSync();
 }
 
@@ -494,13 +499,17 @@ void FmLibPlugAudioProcessor::handleMorphPositionHostChange (const juce::String&
     else
         liveMorph.posY = fmlib::clampMorph01 (newValue);
 
-    requestApplyLiveMorph (true, false);
+    // Host pad automation: stream under budget, but commit ABCD-XX:YY while motion is Off.
+    requestApplyLiveMorph (true, false,
+                           fmlib::morphShouldUpdateLiveName (getMorphMotionChoice(), true));
 }
 
-void FmLibPlugAudioProcessor::requestApplyLiveMorph (bool dragEmit, bool liveAllParams)
+void FmLibPlugAudioProcessor::requestApplyLiveMorph (bool dragEmit, bool liveAllParams, bool updateName)
 {
     if (liveAllParams)
         morphApplyLiveAllPending = true;
+    if (updateName)
+        morphApplyUpdateNamePending = true;
 
     if (dragEmit && ! liveAllParams)
     {
@@ -518,7 +527,8 @@ void FmLibPlugAudioProcessor::requestApplyLiveMorph (bool dragEmit, bool liveAll
     if (juce::MessageManager::getInstance()->isThisTheMessageThread())
     {
         const bool allParams = morphApplyLiveAllPending.exchange (false) || liveAllParams;
-        applyLiveMorph (dragEmit, allParams);
+        const bool name = morphApplyUpdateNamePending.exchange (false) || updateName;
+        applyLiveMorph (dragEmit, allParams, name);
         notifyMorphUiSync();
         return;
     }
@@ -533,7 +543,8 @@ void FmLibPlugAudioProcessor::requestApplyLiveMorph (bool dragEmit, bool liveAll
             return;
         morphApplyPending = false;
         const bool allParams = morphApplyLiveAllPending.exchange (false);
-        applyLiveMorph (dragEmit, allParams);
+        const bool name = morphApplyUpdateNamePending.exchange (false);
+        applyLiveMorph (dragEmit, allParams, name);
         notifyMorphUiSync();
     });
 }
@@ -554,7 +565,8 @@ void FmLibPlugAudioProcessor::chaseHostMorphParameters()
 
     liveMorph.posX = x;
     liveMorph.posY = y;
-    requestApplyLiveMorph (true, false);
+    requestApplyLiveMorph (true, false,
+                           fmlib::morphShouldUpdateLiveName (getMorphMotionChoice(), true));
 }
 
 void FmLibPlugAudioProcessor::cacheHostTransport()
@@ -687,16 +699,20 @@ void FmLibPlugAudioProcessor::pushLiveMorphToApvts()
     setLockRefPosition (liveMorph.lockRefX, liveMorph.lockRefY, false, false);
 }
 
-void FmLibPlugAudioProcessor::applyLiveMorph (bool dragEmit, bool liveAllParams)
+void FmLibPlugAudioProcessor::applyLiveMorph (bool dragEmit, bool liveAllParams, bool updateName)
 {
     if (morphEgressPaused || ! allLiveCornersReady())
         return;
 
     morphLastAppliedX = liveMorph.posX;
     morphLastAppliedY = liveMorph.posY;
-    const auto voice = fmlib::VoiceMorpher::morph4 (liveMorph.a, liveMorph.b, liveMorph.c, liveMorph.d,
-                                                    morphLastAppliedX, morphLastAppliedY, liveMorph.lockGroups,
-                                                    liveMorph.lockRefX, liveMorph.lockRefY);
+    auto voice = fmlib::VoiceMorpher::morph4 (liveMorph.a, liveMorph.b, liveMorph.c, liveMorph.d,
+                                              morphLastAppliedX, morphLastAppliedY, liveMorph.lockGroups,
+                                              liveMorph.lockRefX, liveMorph.lockRefY);
+    // Pad commit / host automation may update ABCD-XX:YY; Edge/Note/locks keep the frozen name.
+    // Edge/Note motion always freezes even if a coalesced host updateName flag is pending.
+    const bool commitName = updateName && ! fmlib::isMorphMotionActive (getMorphMotionChoice());
+    fmlib::VoiceMorpher::applyLiveNamePolicy (voice, frozenMorphName, frozenMorphNameValid, commitName);
     // Drag/LFO: stream under budget. Click / drag-end / jump: commit (full dump when idle).
     // Lock-ref: liveAllParams so EG/level locks update a held note in Frequency-only mode.
     if (liveAllParams)
@@ -839,7 +855,7 @@ void FmLibPlugAudioProcessor::parameterChanged (const juce::String& parameterID,
             liveMorph.lockRefX = fmlib::clampMorph01 (newValue);
         else
             liveMorph.lockRefY = fmlib::clampMorph01 (newValue);
-        requestApplyLiveMorph (true, true);
+        requestApplyLiveMorph (true, true, false);
         notifyMorphUiSync();
         return;
     }

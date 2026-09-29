@@ -73,6 +73,12 @@ bool isMorphMotionActive (int motionChoice);
 bool isEdgeLfoMotion (int motionChoice);
 bool morphPositionMatchesLastPluginWrite (float x, float y, float lastX, float lastY);
 
+/**
+ * Live morph LCD / dump name (ABCD-XX:YY) should update only for pad commits and
+ * host pad automation while motion is Off — never for Edge LFO / Note morph.
+ */
+bool morphShouldUpdateLiveName (int motionChoice, bool positionCommit);
+
 /** Pad point on the A-B-D-C perimeter for a unit-interval phase. */
 void morphPadEdgePosition (float phase01, bool clockwise, float& x, float& y);
 

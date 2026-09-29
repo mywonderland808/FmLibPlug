@@ -149,7 +149,7 @@ public:
     void setMorphMotionChoice (int choice, bool notifyHost);
     void applyMorphMotionMode (int choice);
 
-    void applyLiveMorph (bool dragEmit, bool liveAllParams);
+    void applyLiveMorph (bool dragEmit, bool liveAllParams, bool updateName);
     bool applyNoteJump();
     void advanceMorphLfo (double deltaSeconds);
     void notifyMorphUiSync();
@@ -172,7 +172,7 @@ private:
     void pushLiveMorphToApvts();
     void publishMorphMotionPosition (float x, float y, bool dragEmit);
     void handleMorphPositionHostChange (const juce::String& parameterID, float newValue);
-    void requestApplyLiveMorph (bool dragEmit, bool liveAllParams);
+    void requestApplyLiveMorph (bool dragEmit, bool liveAllParams, bool updateName);
     void chaseHostMorphParameters();
     void cacheHostTransport();
     bool isTransportPlaying() const;
@@ -211,8 +211,12 @@ private:
     float morphLastWrittenY = -1.0f;
     float morphLastAppliedX = -1.0f;
     float morphLastAppliedY = -1.0f;
+    /** Last manually committed morph LCD name; Edge/Note morph keep this frozen. */
+    fmlib::VoiceNameBytes frozenMorphName {};
+    bool frozenMorphNameValid = false;
     std::atomic<bool> morphApplyPending { false };
     std::atomic<bool> morphApplyLiveAllPending { false };
+    std::atomic<bool> morphApplyUpdateNamePending { false };
     std::atomic<bool> morphUiSyncPending { false };
     std::atomic<bool> morphUiSyncDeferred { false };
     std::atomic<uint32_t> morphLastApplyMs { 0 };
