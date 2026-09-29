@@ -485,7 +485,13 @@ FmLibPlugAudioProcessorEditor::FmLibPlugAudioProcessorEditor (FmLibPlugAudioProc
     settings.setAuditionDurationMs (plugin.prefs.auditionDurationMs);
 
     syncMorphPanelFromProcessor();
-    refreshLibraryView();
+    // Defer library populate so constructor returns quickly and does not starve
+    // message-thread work; hardware thru now flushes on its own worker anyway.
+    juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<FmLibPlugAudioProcessorEditor> (this)]
+    {
+        if (safe != nullptr)
+            safe->refreshLibraryView();
+    });
     updateModeButtons();
     // Tall enough for 32 device-buffer rows; user can resize further in supporting hosts.
     setResizable (true, true);

@@ -94,6 +94,8 @@ bool MidiDeviceManager::openInputByName (const juce::String& name)
 
 bool MidiDeviceManager::openControllerInputByName (const juce::String& name)
 {
+    if (controllerInput != nullptr)
+        controllerInput->stop();
     controllerInput.reset();
     controllerInputName.clear();
     hostControllerInput = false;
@@ -132,6 +134,8 @@ bool MidiDeviceManager::openControllerInputByName (const juce::String& name)
 
 bool MidiDeviceManager::openOutputByName (const juce::String& name)
 {
+    // Stop the thru consumer before tearing down MidiOutput / resetting the FIFO.
+    discardThruRing();
     {
         const juce::ScopedLock sl (outputLock);
         if (output && bgThreadStarted)
@@ -145,6 +149,7 @@ bool MidiDeviceManager::openOutputByName (const juce::String& name)
         const juce::ScopedLock sl (hostOutLock);
         hostOutQueue.clear();
     }
+    // Callbacks may have re-armed the worker while output was null; drop those events.
     discardThruRing();
 
     if (name.isEmpty())
@@ -188,12 +193,15 @@ void MidiDeviceManager::close()
     noteOnFn = nullptr;
     noteOffFn = nullptr;
     notesSoundingFn = nullptr;
+    // Stop MIDI inputs before joining the thru worker so callbacks cannot re-arm flush.
     if (input)
         input->stop();
     if (controllerInput)
         controllerInput->stop();
     input.reset();
     controllerInput.reset();
+    clearThruHeldNotes();
+    discardThruRing();
     {
         const juce::ScopedLock sl (outputLock);
         if (output && bgThreadStarted)
@@ -211,8 +219,6 @@ void MidiDeviceManager::close()
         const juce::ScopedLock sl (hostOutLock);
         hostOutQueue.clear();
     }
-    clearThruHeldNotes();
-    discardThruRing();
     morphBusyUntilMs = 0.0;
     notesQuietAtMs = 0.0;
     notesSoundingLatched = false;
@@ -243,8 +249,46 @@ bool MidiDeviceManager::hasThruNotesSounding() const
 
 void MidiDeviceManager::discardThruRing()
 {
+    stopThruFlushThread();
     thruFifo.reset();
     thruFlushQueued.store (false, std::memory_order_relaxed);
+}
+
+void MidiDeviceManager::ensureThruFlushThread()
+{
+    const juce::ScopedLock sl (thruThreadLock);
+    if (thruFlushThread.joinable())
+        return;
+
+    thruStop.store (false, std::memory_order_release);
+    thruFlushThread = std::thread ([this, aliveFlag = alive]
+    {
+        while (! thruStop.load (std::memory_order_acquire) && aliveFlag->load())
+        {
+            thruWake.wait (-1);
+            if (thruStop.load (std::memory_order_acquire) || ! aliveFlag->load())
+                break;
+            flushThruRing();
+        }
+    });
+}
+
+void MidiDeviceManager::stopThruFlushThread()
+{
+    {
+        const juce::ScopedLock sl (thruThreadLock);
+        thruStop.store (true, std::memory_order_release);
+    }
+    thruWake.signal();
+
+    std::thread local;
+    {
+        const juce::ScopedLock sl (thruThreadLock);
+        if (thruFlushThread.joinable())
+            local = std::move (thruFlushThread);
+    }
+    if (local.joinable())
+        local.join();
 }
 
 void MidiDeviceManager::requestThruFlush()
@@ -253,17 +297,13 @@ void MidiDeviceManager::requestThruFlush()
     if (! thruFlushQueued.compare_exchange_strong (expected, true, std::memory_order_acq_rel))
         return;
 
-    juce::MessageManager::callAsync ([this, alive = alive]
-    {
-        if (! alive->load())
-            return;
-        flushThruRing();
-    });
+    ensureThruFlushThread();
+    thruWake.signal();
 }
 
 void MidiDeviceManager::flushThruRing()
 {
-    // Message thread only — safe to touch MidiOutput::sendMessageNow.
+    // Thru-flush worker single consumer; SysEx/note sends serialize via outputLock.
     for (;;)
     {
         int start1 = 0, size1 = 0, start2 = 0, size2 = 0;
@@ -273,8 +313,14 @@ void MidiDeviceManager::flushThruRing()
         {
             thruFlushQueued.store (false, std::memory_order_release);
             // Race: a writer may have pushed after we saw empty but before clearing the flag.
+            // Re-arm with a wake only — do not call ensureThruFlushThread from the worker
+            // (avoids deadlock if stopThruFlushThread holds thruThreadLock during join).
             if (thruFifo.getNumReady() > 0)
-                requestThruFlush();
+            {
+                bool expected = false;
+                if (thruFlushQueued.compare_exchange_strong (expected, true, std::memory_order_acq_rel))
+                    thruWake.signal();
+            }
             return;
         }
 
@@ -463,7 +509,7 @@ void MidiDeviceManager::thruControllerMessageIfEnabled (const juce::MidiMessage&
         return;
     }
 
-    // Hardware out: copy raw bytes into the POD ring; flush on the message thread.
+    // Hardware out: copy raw bytes into the POD ring; flush on the thru worker thread.
     // Overflow: drop the event. Prefer clearing note-off held bits over stuck notes under flood.
     const auto* raw = message.getRawData();
     const int rawSize = message.getRawDataSize();
@@ -690,7 +736,7 @@ bool MidiDeviceManager::sendMorphVoice (const VoiceData& voice, bool forceCommit
 
 void MidiDeviceManager::timerCallback()
 {
-    flushThruRing();
+    // Thru ring is drained by the dedicated flush worker (not the message thread).
 
     const bool appSounding = notesSoundingFn ? notesSoundingFn() : false;
     updateNotesSounding (appSounding || hasThruNotesSounding());

@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <thread>
 #include <vector>
 
 namespace fmlib
@@ -139,12 +140,15 @@ private:
     void setThruHeldNoteBit (int note, bool held);
     void flushThruRing();
     void requestThruFlush();
+    /** Stop the thru worker (if any), then reset the ring. Safe vs flushThruRing. */
     void discardThruRing();
+    void ensureThruFlushThread();
+    void stopThruFlushThread();
     void updateNotesSounding (bool sounding);
     bool inMorphReleaseGuard() const;
     static int estimateSysexWireMs (int byteCount);
 
-    /** Short MIDI events deferred from audio/MIDI callback to the message thread (hardware out). */
+    /** Short MIDI events deferred from audio/MIDI callback to the thru flush worker (hardware out). */
     struct ThruPod
     {
         uint8_t data[3] {};
@@ -177,8 +181,13 @@ private:
 
     juce::AbstractFifo thruFifo { kThruRingSize };
     std::array<ThruPod, kThruRingSize> thruRing {};
-    /** True while a message-thread flush is queued or running. */
+    /** True while a thru-worker flush is queued or running. */
     std::atomic<bool> thruFlushQueued { false };
+    std::atomic<bool> thruStop { false };
+    juce::WaitableEvent thruWake;
+    std::thread thruFlushThread;
+    /** Serializes thru thread start/stop (not held across join wait alone — see stopThruFlushThread). */
+    juce::CriticalSection thruThreadLock;
 
     MorphTransport morph;
     NotesSoundingFn notesSoundingFn;
