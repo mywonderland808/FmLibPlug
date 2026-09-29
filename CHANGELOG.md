@@ -7,15 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.7] - 2026-09-29
+
+### Added
+- Library meta browse pipeline with async rebuild and folder scan cache (VoiceData stays off the UI path for large libraries)
+- Morph **Restore default** lock set for a wavetable-like pad scan (EG, Levels, Algorithm, Coarse, Key sync, Transpose, LFO, AMS/Vel); Fine and Feedback stay free to morph
+
 ### Changed
-- Morph **Reset** clears all lock groups; **Restore default** applies the fixed wavetable-like factory set (EG, Levels, Algorithm, Coarse, Key sync, Transpose, LFO, AMS/Vel). Fine and Feedback stay free to morph
-- `morphLockSchema` 3 one-shot migrates older prefs to that factory set (custom schema-2 lock choices are replaced on load)
+- Morph **Reset** clears all lock groups (lock-ref position unchanged); removed save-current-as-defaults
+- `morphLockSchema` 3 one-shot migrates older prefs to the wavetable factory set (custom schema-2 lock choices are replaced on load)
 - Morph pad hint notes that right-drag lock-ref only affects sound when locks are on
-- Morph LCD name updates on pad commit / host pad automation only (frozen during Edge LFO and Note morph)
-- Globals page and TX7 Globals strip use short ASCII labels; longer Get RX / Get Fn detail lives in tooltips and status stays brief
+- Morph LCD name (`ABCD-XX:YY`) updates on pad commit / host pad automation only; frozen during Edge LFO and Note morph
+- Globals page and TX7 Globals strip use short ASCII labels; longer Get RX / Get Fn detail lives in tooltips; status stays brief
 
 ### Fixed
-- Lock chip / Reset / Restore default now sync processor lock groups before the morph MIDI emit (no one-frame stale mask)
+- Hardware controller thru flushes on a dedicated worker so library/UI work cannot delay note on/off
+- Lock chip / Reset / Restore default sync processor lock groups before the morph MIDI emit (no one-frame stale mask)
 
 ## [1.3.6] - 2026-09-07
 

@@ -1,6 +1,6 @@
 # FmLibPlug
 
-**Version 1.3.6** — AGPL-3.0 JUCE 8 MIDI librarian for **DX7 / TX7–compatible** voice SysEx.
+**Version 1.3.7** — AGPL-3.0 JUCE 8 MIDI librarian for **DX7 / TX7–compatible** voice SysEx.
 
 Product name: **FmLibPlug**. Compatibility only: FM SysEx librarian for DX7 mkI / TX7 hardware and compatible devices. Release notes: [CHANGELOG.md](CHANGELOG.md). Version source: `project(FmLibPlug VERSION ...)` in `CMakeLists.txt`. Cross-platform notes: [docs/PLATFORM.md](docs/PLATFORM.md).
 

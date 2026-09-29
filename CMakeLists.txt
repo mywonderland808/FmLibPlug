@@ -1,7 +1,7 @@
 # FmLibPlug
 cmake_minimum_required(VERSION 3.22)
 
-project(FmLibPlug VERSION 1.3.6)
+project(FmLibPlug VERSION 1.3.7)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
