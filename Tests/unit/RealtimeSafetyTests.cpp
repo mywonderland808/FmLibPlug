@@ -152,7 +152,7 @@ TEST_CASE ("collectHostMidiOutput with pending bulk stays allocation-free", "[mi
     REQUIRE (midi.sendBank (bank));
 
     juce::MidiBuffer buf;
-    // Host buffers are expected to have capacity; warm it outside the RT guard.
+    // Assumes host MidiBuffer capacity (see docs/THREADING.md). Warm outside the RT guard.
     buf.ensureSize (HostMidiRing::kMaxSysexBytes + 4096);
     {
         ScopedRtGuard guard;
@@ -160,6 +160,48 @@ TEST_CASE ("collectHostMidiOutput with pending bulk stays allocation-free", "[mi
         REQUIRE (guard.allocations() == 0);
     }
     REQUIRE (buf.getNumEvents() >= 1);
+}
+
+TEST_CASE ("collectHostMidiOutput into cold buffer may allocate", "[midi][rt][alloc]")
+{
+    MidiDeviceManager midi;
+    REQUIRE (midi.openOutputByName (kDawMidiPortName));
+
+    std::array<VoiceData, kBankVoiceCount> bank {};
+    REQUIRE (midi.sendBank (bank));
+
+    juce::MidiBuffer buf; // no ensureSize — models an undersized host wrapper
+    uint64_t allocs = 0;
+    {
+        ScopedRtGuard guard;
+        midi.collectHostMidiOutput (buf);
+        allocs = guard.allocations();
+    }
+    // Residual risk: addEvent may grow the host buffer. Non-zero is allowed / expected here.
+    // Intentionally not REQUIRE(allocs == 0) — that is the warm-capacity test above.
+    INFO ("cold collectHostMidiOutput allocations: " << allocs);
+    if (allocs == 0)
+        WARN ("cold MidiBuffer collected bulk with 0 allocs (capacity already present)");
+    REQUIRE (buf.getNumEvents() >= 1);
+}
+
+TEST_CASE ("processBlock-equivalent host MIDI path stays allocation-free", "[midi][rt][alloc]")
+{
+    // Mirrors PluginProcessor::processBlock MIDI work (tests do not link the processor).
+    MidiDeviceManager midi;
+    REQUIRE (midi.openControllerInputByName (kDawMidiPortName));
+    REQUIRE (midi.openOutputByName (kDawMidiPortName));
+
+    juce::MidiBuffer buf;
+    for (int i = 0; i < 64; ++i)
+        buf.addEvent (juce::MidiMessage::controllerEvent (1, 1, i & 0x7f), i);
+    buf.ensureSize (HostMidiRing::kMaxSysexBytes + 4096);
+
+    {
+        ScopedRtGuard guard;
+        midi.exchangeHostMidi (buf);
+        REQUIRE (guard.allocations() == 0);
+    }
 }
 
 TEST_CASE ("mid-fragment host overflow aborts reassembly", "[midi][rt]")
