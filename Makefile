@@ -190,8 +190,6 @@ build: ensure-configure write-build-id
 	@echo ""
 	@echo "Build complete (not installed)."
 	@echo "Artefacts: $(ARTEFACT_ROOT)/"
-	@echo "UI build id is shown next to the version label — confirm it after loading in the DAW."
-	@echo "Next:  make install    # or: make plugins  (= build + install)"
 
 write-build-id:
 	@mkdir -p "$(BUILD_DIR)/generated"; \
