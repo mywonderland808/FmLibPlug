@@ -92,4 +92,5 @@ cmake --build build --target FmLibPlugUnitTests
 ## Format notes
 
 - Prefer **hardware** ports for large bulks; many hosts truncate SysEx on the plugin MIDI bus.
+- The host owns the `MidiBuffer` passed to `processBlock`. `collectHostMidiOutput` calls `MidiBuffer::addEvent`, which may allocate if the wrapper buffer is undersized (e.g. first ~4 KiB bank into a ~2 KiB VST3 buffer). We do **not** `ensureSize` on the audio thread. Unit tests that assert zero allocations warm capacity first; cold host buffers are not claimed RT-safe for huge SysEx.
 - VST3/AU/LV2/CLAP differ in SysEx packaging; JUCE maps where possible. CLAP SysEx pointers are only valid for the process call — collect copies into the host `MidiBuffer` before returning.
