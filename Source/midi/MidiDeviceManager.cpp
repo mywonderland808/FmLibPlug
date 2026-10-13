@@ -193,6 +193,7 @@ void MidiDeviceManager::clearHostRingsSafe()
     // hostThruScratchCount is audio-thread only (reset on next exchangeHostMidi).
     hostInSysexOpen.store (false, std::memory_order_relaxed);
     hostInSysexAbort.store (false, std::memory_order_relaxed);
+    hostInSysexDiscardUntilF0.store (false, std::memory_order_relaxed);
     hostSysexReassembly.clear();
     hostMidiSuspended.store (false, std::memory_order_seq_cst);
 }
@@ -484,7 +485,10 @@ bool MidiDeviceManager::testPushDeviceSysex (const uint8_t* data, int size, bool
         return false;
     const bool ok = hostInRing.tryPushSysex (data, size, 0, 0.0, fragment);
     if (ok)
+    {
+        hostInSysexDiscardUntilF0.store (false, std::memory_order_relaxed);
         hostInSysexOpen.store (fragment, std::memory_order_relaxed);
+    }
     else
     {
         flagHostOverflow();
@@ -492,6 +496,7 @@ bool MidiDeviceManager::testPushDeviceSysex (const uint8_t* data, int size, bool
         {
             hostInSysexOpen.store (false, std::memory_order_relaxed);
             hostInSysexAbort.store (true, std::memory_order_release);
+            hostInSysexDiscardUntilF0.store (true, std::memory_order_release);
         }
     }
     return ok;
@@ -766,6 +771,7 @@ void MidiDeviceManager::processHostMidiInput (const juce::MidiBuffer& midiMessag
         return;
 
     const bool thruOn = controllerThru.load (std::memory_order_relaxed);
+    bool discardUntilF0 = hostInSysexDiscardUntilF0.load (std::memory_order_relaxed);
 
     for (const auto metadata : midiMessages)
     {
@@ -776,8 +782,25 @@ void MidiDeviceManager::processHostMidiInput (const juce::MidiBuffer& midiMessag
             continue;
 
         const auto statusByte = (uint8_t) raw[0];
+        const bool startsF0 = statusByte == 0xf0;
+
+        if (discardUntilF0)
+        {
+            if (startsF0)
+            {
+                discardUntilF0 = false;
+                hostInSysexDiscardUntilF0.store (false, std::memory_order_relaxed);
+            }
+            else if (statusByte < 0x80 || statusByte == 0xf7)
+            {
+                // Running-status / orphaned F7 remnants only — keep dropping until next F0.
+                // Channel messages (0x8n–0xEn) still flow to the controller path.
+                continue;
+            }
+        }
+
         const bool sysexCont = hostInSysexOpen.load (std::memory_order_relaxed) && statusByte < 0x80;
-        const bool looksSysex = statusByte == 0xf0 || statusByte == 0xf7 || sysexCont;
+        const bool looksSysex = startsF0 || statusByte == 0xf7 || sysexCont;
 
         if (controllerIn && ! looksSysex && rawSize <= 3)
         {
@@ -795,7 +818,6 @@ void MidiDeviceManager::processHostMidiInput (const juce::MidiBuffer& midiMessag
         if (deviceIn && looksSysex)
         {
             const bool endsF7 = (uint8_t) raw[rawSize - 1] == 0xf7;
-            const bool startsF0 = statusByte == 0xf0;
             const bool fragment = (startsF0 || sysexCont) && ! endsF7;
             if (! hostInRing.tryPushSysex (raw, rawSize, sampleOffset, 0.0, fragment))
             {
@@ -805,6 +827,8 @@ void MidiDeviceManager::processHostMidiInput (const juce::MidiBuffer& midiMessag
                 {
                     hostInSysexOpen.store (false, std::memory_order_relaxed);
                     hostInSysexAbort.store (true, std::memory_order_release);
+                    hostInSysexDiscardUntilF0.store (true, std::memory_order_release);
+                    discardUntilF0 = true;
                 }
             }
             else

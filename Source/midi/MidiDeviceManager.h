@@ -181,6 +181,8 @@ private:
     std::atomic<bool> hostInSysexOpen { false };
     /** Message thread clears reassembly after an audio-side mid-fragment overflow. */
     std::atomic<bool> hostInSysexAbort { false };
+    /** After mid-fragment overflow: ignore non-F0 bytes until a new SysEx starts. */
+    std::atomic<bool> hostInSysexDiscardUntilF0 { false };
 
     HostMidiRing hostInRing;
     HostShortOutRing hostOutShort;

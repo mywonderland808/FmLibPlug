@@ -248,3 +248,61 @@ TEST_CASE ("mid-fragment host overflow aborts reassembly", "[midi][rt]")
     REQUIRE (last.front() == 0xf0);
     REQUIRE (last.back() == 0xf7);
 }
+
+TEST_CASE ("post-abort SysEx continuations are not routed as short MIDI", "[midi][rt]")
+{
+    MidiDeviceManager midi;
+    REQUIRE (midi.openInputByName (kDawMidiPortName));
+    REQUIRE (midi.openControllerInputByName (kDawMidiPortName));
+    REQUIRE (midi.openOutputByName (kDawMidiPortName));
+    midi.setControllerThru (true);
+
+    int noteOns = 0;
+    midi.setControllerNoteOnCallback ([&] (int, int) { ++noteOns; });
+
+    int deliveries = 0;
+    midi.setSysexReceivedCallback ([&] (const std::vector<uint8_t>&) { ++deliveries; });
+
+    const auto dump = SysexMessages::makeSingleVoiceDump (VoiceData {}, 1);
+    REQUIRE (midi.testPushDeviceSysex (dump.data(), 40, true));
+
+    std::vector<uint8_t> pad { 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07 };
+    while (midi.testPushDeviceSysex (pad.data(), (int) pad.size(), true))
+    {
+    }
+
+    midi.pumpHostMidiInput(); // apply abort / drain fragments
+    REQUIRE (deliveries == 0);
+
+    // ≤3-byte continuation must not become controller short MIDI (ring or thru).
+    const uint8_t cont[] { 0x40, 0x01, 0x02 };
+    juce::MidiBuffer in;
+    in.addEvent (cont, (int) sizeof (cont), 0);
+    midi.exchangeHostMidi (in);
+
+    bool sawContOut = false;
+    for (const auto meta : in)
+    {
+        const auto* raw = meta.data;
+        if (raw != nullptr && meta.numBytes == 3
+            && raw[0] == 0x40 && raw[1] == 0x01 && raw[2] == 0x02)
+            sawContOut = true;
+    }
+    REQUIRE_FALSE (sawContOut);
+
+    midi.pumpHostMidiInput();
+    REQUIRE (noteOns == 0); // continuation must not reach controller callbacks via the ring
+
+    // Channel messages still work while discard-until-F0 is sticky.
+    juce::MidiBuffer noteBuf;
+    noteBuf.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100), 0);
+    midi.exchangeHostMidi (noteBuf);
+    midi.pumpHostMidiInput();
+    REQUIRE (noteOns == 1);
+
+    juce::MidiBuffer full;
+    full.addEvent (juce::MidiMessage (dump.data(), (int) dump.size()), 0);
+    midi.exchangeHostMidi (full);
+    midi.pumpHostMidiInput();
+    REQUIRE (deliveries == 1);
+}
