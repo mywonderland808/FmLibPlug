@@ -2,11 +2,27 @@
 
 **Version 1.3.7** — AGPL-3.0 JUCE 8 MIDI librarian for **DX7 / TX7–compatible** voice SysEx.
 
-Product name: **FmLibPlug**. Compatibility only: FM SysEx librarian for DX7 mkI / TX7 hardware and compatible devices. Release notes: [CHANGELOG.md](CHANGELOG.md). Version source: `project(FmLibPlug VERSION ...)` in `CMakeLists.txt`. Cross-platform notes: [docs/PLATFORM.md](docs/PLATFORM.md).
+FmLibPlug browses multi-folder SysEx libraries, sends and receives DX7/TX7 voice and function data, and morphs four corner patches over MIDI — as a plugin (VST3/LV2/CLAP/AU) or Standalone. Audio is passthrough; the product is MIDI/SysEx I/O with a real-time-safe `(DAW)` host bus path.
+
+Product name: **FmLibPlug**. Compatibility only: FM SysEx librarian for DX7 mkI / TX7 hardware and compatible devices. Release notes: [CHANGELOG.md](CHANGELOG.md). Version source: `project(FmLibPlug VERSION ...)` in `CMakeLists.txt`. Cross-platform notes: [docs/PLATFORM.md](docs/PLATFORM.md). Threading / RT: [docs/THREADING.md](docs/THREADING.md).
 
 Yamaha, DX7, and TX7 are trademarks of Yamaha Corporation. FmLibPlug is an independent project and is **not affiliated with, endorsed by, or sponsored by Yamaha**. Provided **without warranty**; see [LICENSE](LICENSE).
 
-Do **not** commit or redistribute third-party voice banks or cartridges. Keep local `.syx` / `.dx7` libraries in gitignored folders (e.g. `Presets/`). Test fixtures under `Tests/fixtures/` are synthetic.
+Do **not** commit or redistribute third-party voice banks or cartridges. Keep local `.syx` / `.dx7` libraries in gitignored folders (e.g. `Presets/`). Test fixtures under `Tests/fixtures/` are synthetic. Screenshots below use synthetic voice names only.
+
+## Screenshots
+
+Illustrative UI mockups (synthetic patch names only — not live captures of a DAW session):
+
+| Library browser | Morph pad |
+|-----------------|-----------|
+| ![Patch browser](docs/images/browser-dark.jpg) | ![Morph pad](docs/images/morph-pad-dark.jpg) |
+
+| TX7 Globals | Settings |
+|-------------|----------|
+| ![Globals](docs/images/globals-dark.jpg) | ![Settings](docs/images/settings-dark.jpg) |
+
+Morph pad motion (illustrative SVG): ![Morph drag](docs/images/morph-drag.svg)
 
 ## Features
 
@@ -192,6 +208,17 @@ make check-all      # unit + smoke
 ```
 
 Or: `cmake --build build --target check` (also `check-smoke`, `check-all`).
+
+### Real-time safety
+
+`(DAW)` host MIDI uses lock-free rings so the audio thread does not allocate, lock, or `callAsync`. See [docs/THREADING.md](docs/THREADING.md).
+
+```bash
+./build/FmLibPlugUnitTests "[rt]"     # alloc-guard + ordering
+./build/FmLibPlugUnitTests "[midi]"   # host routing + rings
+```
+
+Optional ThreadSanitizer build: `-DFMLIBPLUG_TSAN=ON` (also run as a non-blocking CI job on Linux).
 
 ### Hardware MIDI (TX7 / DX7)
 
