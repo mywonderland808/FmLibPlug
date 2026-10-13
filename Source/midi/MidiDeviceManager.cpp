@@ -159,14 +159,15 @@ bool MidiDeviceManager::openControllerInputByName (const juce::String& name)
 void MidiDeviceManager::clearHostRingsSafe()
 {
     // Stop audio producers/consumers before AbstractFifo::reset (not SPSC-safe vs live R/W).
-    hostMidiSuspended.store (true, std::memory_order_release);
+    // seq_cst with audioHostMidiDepth: Dekker handshake vs exchangeHostMidi.
+    hostMidiSuspended.store (true, std::memory_order_seq_cst);
     hostOutput.store (false, std::memory_order_release);
 
     // Never reset while audio is inside exchangeHostMidi. If depth stays >0 (stuck callback),
     // keep waiting — do not clear — but surface diagnostics after a few seconds.
     bool warnedStuck = false;
     const auto waitStart = std::chrono::steady_clock::now();
-    for (int i = 0; audioHostMidiDepth.load (std::memory_order_acquire) > 0; ++i)
+    for (int i = 0; audioHostMidiDepth.load (std::memory_order_seq_cst) > 0; ++i)
     {
         std::this_thread::yield();
         if ((i & 63) == 63)
@@ -193,7 +194,7 @@ void MidiDeviceManager::clearHostRingsSafe()
     hostInSysexOpen.store (false, std::memory_order_relaxed);
     hostInSysexAbort.store (false, std::memory_order_relaxed);
     hostSysexReassembly.clear();
-    hostMidiSuspended.store (false, std::memory_order_release);
+    hostMidiSuspended.store (false, std::memory_order_seq_cst);
 }
 
 bool MidiDeviceManager::openOutputByName (const juce::String& name)
@@ -479,7 +480,7 @@ void MidiDeviceManager::setMessageThreadPump (MessagePumpFn fn)
 bool MidiDeviceManager::testPushDeviceSysex (const uint8_t* data, int size, bool fragment)
 {
     if (! hostDeviceInput.load (std::memory_order_relaxed)
-        || hostMidiSuspended.load (std::memory_order_acquire))
+        || hostMidiSuspended.load (std::memory_order_seq_cst))
         return false;
     const bool ok = hostInRing.tryPushSysex (data, size, 0, 0.0, fragment);
     if (ok)
@@ -545,12 +546,12 @@ bool MidiDeviceManager::enqueueHostSysex (const uint8_t* data, int size, double 
 
 void MidiDeviceManager::exchangeHostMidi (juce::MidiBuffer& midiMessages)
 {
-    audioHostMidiDepth.fetch_add (1, std::memory_order_acq_rel);
+    audioHostMidiDepth.fetch_add (1, std::memory_order_seq_cst);
     hostThruScratchCount = 0;
     processHostMidiInput (midiMessages);
     midiMessages.clear();
     collectHostMidiOutput (midiMessages);
-    audioHostMidiDepth.fetch_sub (1, std::memory_order_acq_rel);
+    audioHostMidiDepth.fetch_sub (1, std::memory_order_seq_cst);
 }
 
 void MidiDeviceManager::collectHostMidiOutput (juce::MidiBuffer& midiMessages)
@@ -755,7 +756,7 @@ void MidiDeviceManager::handleControllerMessage (const juce::MidiMessage& messag
 
 void MidiDeviceManager::processHostMidiInput (const juce::MidiBuffer& midiMessages)
 {
-    if (hostMidiSuspended.load (std::memory_order_acquire))
+    if (hostMidiSuspended.load (std::memory_order_seq_cst))
         return;
 
     // Snapshot once so mid-call open/close cannot tear the loop.
