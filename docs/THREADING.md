@@ -76,6 +76,7 @@ Producer-side SysEx enqueue returns `false` on overflow (bulk/morph callers can 
 1. Open `(DAW)` in/controller → start host pump timer (when a message manager exists).
 2. Open hardware out → start thru-flush worker (**not** from the audio thread).
 3. `close()` / destructor: stop timer, join thru worker, clear rings, `alive` flag for async callbacks.
+4. Host port clear (`clearHostRingsSafe`) blocks the **message thread** until `audioHostMidiDepth` reaches 0 (audio has left `exchangeHostMidi`). If a host freezes the audio callback mid-exchange, the UI can stall; after ~3s a status line and debug assert fire, but the wait continues (unsafe to `AbstractFifo::reset` while audio still touches the rings).
 
 ## Verification
 
