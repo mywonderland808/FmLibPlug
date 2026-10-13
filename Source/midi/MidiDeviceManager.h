@@ -1,6 +1,7 @@
 #pragma once
 
 #include "midi/MorphTransport.h"
+#include "midi/RtMidiRing.h"
 #include "sysex/Dx7Formats.h"
 #include "sysex/Tx7Function.h"
 #include <juce_audio_devices/juce_audio_devices.h>
@@ -9,6 +10,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <thread>
 #include <vector>
 
@@ -23,6 +25,8 @@ public:
     using SysexFn = std::function<void(const std::vector<uint8_t>&)>;
     using NoteOnFn = std::function<void(int note, int velocity)>;
     using NotesSoundingFn = std::function<bool()>;
+    /** Extra message-thread work each pump tick. Return true to keep the idle timer alive. */
+    using MessagePumpFn = std::function<bool()>;
 
     MidiDeviceManager();
     ~MidiDeviceManager() override;
@@ -38,18 +42,23 @@ public:
 
     bool usesHostDeviceInput() const { return hostDeviceInput; }
     bool usesHostControllerInput() const { return hostControllerInput; }
-    bool usesHostOutput() const { return hostOutput; }
+    bool usesHostOutput() const { return hostOutput.load (std::memory_order_relaxed); }
 
     /**
      * Audio thread: consume host MIDI for the (DAW) ports, then replace the buffer
      * with plugin-originated output only. Incoming notes/CC never pass through;
      * they reach MIDI out only via controller thru or sendNoteOn / SysEx.
+     * Real-time safe: no heap alloc, no locks, no callAsync, no thread start.
      */
     void exchangeHostMidi (juce::MidiBuffer& midiMessages);
-    /** Audio thread: consume host MIDI in; posts callbacks on the message thread. */
-    void processHostMidiInput (const juce::MidiBuffer& midiMessages);
-    /** Audio thread: append queued host MIDI out events. */
+    /** Audio thread: append queued host MIDI out events (lock-free rings). */
     void collectHostMidiOutput (juce::MidiBuffer& midiMessages);
+    /** Message thread / tests: drain InRing into handlers. */
+    void pumpHostMidiInput();
+    /** Register message-thread work on the host/morph timer (call from message thread). */
+    void setMessageThreadPump (MessagePumpFn fn);
+    /** Test helper: push raw device SysEx into InRing; follow with pumpHostMidiInput(). */
+    bool testPushDeviceSysex (const uint8_t* data, int size, bool fragment);
 
     void setChannel (int channel1to16);
     int getChannel() const { return channel; }
@@ -127,35 +136,36 @@ public:
 private:
     void handleIncomingMidiMessage (juce::MidiInput*, const juce::MidiMessage& message) override;
     void timerCallback() override;
+    void processHostMidiInput (const juce::MidiBuffer& midiMessages);
     void setStatus (const juce::String& s);
     void ensureBackgroundThread();
     bool sendMessagesScheduled (const std::vector<std::vector<uint8_t>>& messages, int spacingMs);
     bool sendMessageNowLocked (const juce::MidiMessage& message);
-    void enqueueHostOutput (const juce::MidiMessage& message, double dueMs = 0.0);
+    bool enqueueHostShort (const uint8_t* data, int size, int sampleOffset = 0);
+    bool enqueueHostSysex (const uint8_t* data, int size, double dueMs);
     void handleControllerMessage (const juce::MidiMessage& message, bool thruAlreadyHandled = false);
-    void thruControllerMessageIfEnabled (const juce::MidiMessage& message);
+    void thruControllerMessageIfEnabled (const juce::MidiMessage& message,
+                                         int sampleOffset = 0,
+                                         bool useBlockThruScratch = false);
+    void thruControllerRawIfEnabled (const uint8_t* raw, int rawSize, int sampleOffset,
+                                     bool useBlockThruScratch);
     void handleDeviceSysex (const juce::MidiMessage& message);
-    void ensureMorphTimer();
+    void handleDeviceSysexBytes (const uint8_t* data, int size, bool fragment);
+    void ensureHostPumpTimer();
+    void clearHostRingsSafe();
     void clearThruHeldNotes();
     void setThruHeldNoteBit (int note, bool held);
     void flushThruRing();
     void requestThruFlush();
-    /** Stop the thru worker (if any), then reset the ring. Safe vs flushThruRing. */
     void discardThruRing();
     void ensureThruFlushThread();
     void stopThruFlushThread();
     void updateNotesSounding (bool sounding);
     bool inMorphReleaseGuard() const;
+    void reportHostOverflowStatus();
+    void flagHostOverflow();
     static int estimateSysexWireMs (int byteCount);
-
-    /** Short MIDI events deferred from audio/MIDI callback to the thru flush worker (hardware out). */
-    struct ThruPod
-    {
-        uint8_t data[3] {};
-        uint8_t size = 0; // 1..3
-    };
-
-    static constexpr int kThruRingSize = 512;
+    static constexpr int kLargeSysexBytes = 256;
 
     std::unique_ptr<juce::MidiInput> input;
     std::unique_ptr<juce::MidiInput> controllerInput;
@@ -163,14 +173,31 @@ private:
     juce::String inputName, controllerInputName, outputName;
     bool hostDeviceInput = false;
     bool hostControllerInput = false;
-    bool hostOutput = false;
-    juce::CriticalSection hostOutLock;
-    struct HostOutEvent
-    {
-        juce::MidiMessage message;
-        double dueMs = 0.0;
-    };
-    std::vector<HostOutEvent> hostOutQueue;
+    /** DAW out selected; also the audio-side gate (cleared before ring reset). */
+    std::atomic<bool> hostOutput { false };
+    std::atomic<int> audioHostMidiDepth { 0 };
+    std::atomic<bool> hostInSysexOpen { false };
+
+    HostMidiRing hostInRing;
+    HostShortOutRing hostOutShort;
+    HostMidiRing hostOutSysex;
+    std::mutex hostOutProduceMutex;
+    std::atomic<bool> hostOverflowPending { false };
+    uint64_t lastReportedInDroppedSysex = 0;
+    uint64_t lastReportedOutDroppedSysex = 0;
+    uint64_t lastReportedInDroppedEvents = 0;
+
+    MessagePumpFn messagePumpFn;
+
+    static constexpr int kHostThruScratchSlots = 256;
+    using HostThruScratchPod = HostShortOutRing::Pod;
+    std::array<HostThruScratchPod, kHostThruScratchSlots> hostThruScratch {};
+    int hostThruScratchCount = 0;
+
+    static constexpr int kHostSysexScratchBytes = HostMidiRing::kMaxSysexBytes;
+    std::array<uint8_t, kHostSysexScratchBytes> hostCollectScratch {};
+    std::vector<uint8_t> hostSysexReassembly;
+
     int channel = 1;
     int pacingMs = 20;
     int morphReleaseGuardMs = 250;
@@ -179,14 +206,11 @@ private:
     bool bgThreadStarted = false;
     juce::CriticalSection outputLock;
 
-    juce::AbstractFifo thruFifo { kThruRingSize };
-    std::array<ThruPod, kThruRingSize> thruRing {};
-    /** True while a thru-worker flush is queued or running. */
+    ThruShortRing thruRing;
     std::atomic<bool> thruFlushQueued { false };
     std::atomic<bool> thruStop { false };
     juce::WaitableEvent thruWake;
     std::thread thruFlushThread;
-    /** Serializes thru thread start/stop (not held across join wait alone — see stopThruFlushThread). */
     juce::CriticalSection thruThreadLock;
 
     MorphTransport morph;

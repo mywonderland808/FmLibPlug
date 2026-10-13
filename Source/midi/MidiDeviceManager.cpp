@@ -1,7 +1,10 @@
 #include "midi/MidiDeviceManager.h"
 #include "midi/MidiPortNames.h"
 #include "sysex/SysexMessages.h"
+#include <chrono>
 #include <cmath>
+#include <cstring>
+#include <thread>
 
 namespace fmlib
 {
@@ -9,6 +12,25 @@ namespace fmlib
 namespace
 {
 constexpr int kMorphTickMs = 20;
+constexpr int kHostPumpMs = 8;
+
+inline bool isNoteOnRaw (const uint8_t* raw, int rawSize)
+{
+    return raw != nullptr && rawSize > 2 && (raw[0] & 0xf0) == 0x90 && raw[2] > 0;
+}
+
+inline bool isNoteOffRaw (const uint8_t* raw, int rawSize)
+{
+    if (raw == nullptr || rawSize < 2)
+        return false;
+    const auto st = raw[0] & 0xf0;
+    return st == 0x80 || (st == 0x90 && rawSize > 2 && raw[2] == 0);
+}
+
+inline int noteNumberRaw (const uint8_t* raw, int rawSize)
+{
+    return rawSize > 1 ? (int) (raw[1] & 0x7f) : 0;
+}
 } // namespace
 
 int MidiDeviceManager::estimateSysexWireMs (int byteCount)
@@ -71,6 +93,7 @@ bool MidiDeviceManager::openInputByName (const juce::String& name)
     {
         hostDeviceInput = true;
         inputName = name;
+        ensureHostPumpTimer();
         setStatus ("MIDI in: " + name);
         return true;
     }
@@ -111,6 +134,7 @@ bool MidiDeviceManager::openControllerInputByName (const juce::String& name)
     {
         hostControllerInput = true;
         controllerInputName = name;
+        ensureHostPumpTimer();
         setStatus ("MIDI controller in: " + name);
         return true;
     }
@@ -132,6 +156,27 @@ bool MidiDeviceManager::openControllerInputByName (const juce::String& name)
     return false;
 }
 
+void MidiDeviceManager::clearHostRingsSafe()
+{
+    hostOutput.store (false, std::memory_order_release);
+    for (int i = 0; i < 500 && audioHostMidiDepth.load (std::memory_order_acquire) > 0; ++i)
+    {
+        std::this_thread::yield();
+        if ((i & 63) == 63)
+            std::this_thread::sleep_for (std::chrono::microseconds (50));
+    }
+
+    {
+        std::lock_guard<std::mutex> lock (hostOutProduceMutex);
+        hostOutShort.clear();
+        hostOutSysex.clear();
+        hostInRing.clear();
+    }
+    hostThruScratchCount = 0;
+    hostInSysexOpen.store (false, std::memory_order_relaxed);
+    hostSysexReassembly.clear();
+}
+
 bool MidiDeviceManager::openOutputByName (const juce::String& name)
 {
     // Stop the thru consumer before tearing down MidiOutput / resetting the FIFO.
@@ -143,13 +188,8 @@ bool MidiDeviceManager::openOutputByName (const juce::String& name)
         output.reset();
         bgThreadStarted = false;
         outputName.clear();
-        hostOutput = false;
     }
-    {
-        const juce::ScopedLock sl (hostOutLock);
-        hostOutQueue.clear();
-    }
-    // Callbacks may have re-armed the worker while output was null; drop those events.
+    clearHostRingsSafe();
     discardThruRing();
 
     if (name.isEmpty())
@@ -159,8 +199,9 @@ bool MidiDeviceManager::openOutputByName (const juce::String& name)
     }
     if (isDawMidiPortName (name))
     {
-        hostOutput = true;
         outputName = name;
+        hostOutput.store (true, std::memory_order_release);
+        ensureHostPumpTimer();
         setStatus ("MIDI out: " + name);
         return true;
     }
@@ -176,6 +217,8 @@ bool MidiDeviceManager::openOutputByName (const juce::String& name)
                 output = std::move (out);
                 outputName = name;
                 ensureBackgroundThread();
+                // Start thru worker off the audio thread (never from requestThruFlush).
+                ensureThruFlushThread();
                 setStatus ("MIDI out: " + name);
                 return true;
             }
@@ -188,7 +231,8 @@ bool MidiDeviceManager::openOutputByName (const juce::String& name)
 void MidiDeviceManager::close()
 {
     ++thruSyncEpoch; // cancel pending thru sync lambdas
-    stopTimer();
+    if (juce::MessageManager::getInstanceWithoutCreating() != nullptr)
+        stopTimer();
     sysexFn = nullptr;
     noteOnFn = nullptr;
     noteOffFn = nullptr;
@@ -214,11 +258,8 @@ void MidiDeviceManager::close()
     outputName.clear();
     hostDeviceInput = false;
     hostControllerInput = false;
-    hostOutput = false;
-    {
-        const juce::ScopedLock sl (hostOutLock);
-        hostOutQueue.clear();
-    }
+    messagePumpFn = nullptr;
+    clearHostRingsSafe();
     morphBusyUntilMs = 0.0;
     notesQuietAtMs = 0.0;
     notesSoundingLatched = false;
@@ -250,7 +291,7 @@ bool MidiDeviceManager::hasThruNotesSounding() const
 void MidiDeviceManager::discardThruRing()
 {
     stopThruFlushThread();
-    thruFifo.reset();
+    thruRing.clear();
     thruFlushQueued.store (false, std::memory_order_relaxed);
 }
 
@@ -297,47 +338,29 @@ void MidiDeviceManager::requestThruFlush()
     if (! thruFlushQueued.compare_exchange_strong (expected, true, std::memory_order_acq_rel))
         return;
 
-    ensureThruFlushThread();
+    // Worker must already be running (started from openOutputByName). Audio only signals.
     thruWake.signal();
 }
 
 void MidiDeviceManager::flushThruRing()
 {
-    // Thru-flush worker single consumer; SysEx/note sends serialize via outputLock.
-    for (;;)
+    ThruShortRing::Pod pod;
+    bool sentAny = false;
+    while (thruRing.pop (pod))
     {
-        int start1 = 0, size1 = 0, start2 = 0, size2 = 0;
-        thruFifo.prepareToRead (thruFifo.getNumReady(), start1, size1, start2, size2);
-        const int total = size1 + size2;
-        if (total <= 0)
-        {
-            thruFlushQueued.store (false, std::memory_order_release);
-            // Race: a writer may have pushed after we saw empty but before clearing the flag.
-            // Re-arm with a wake only — do not call ensureThruFlushThread from the worker
-            // (avoids deadlock if stopThruFlushThread holds thruThreadLock during join).
-            if (thruFifo.getNumReady() > 0)
-            {
-                bool expected = false;
-                if (thruFlushQueued.compare_exchange_strong (expected, true, std::memory_order_acq_rel))
-                    thruWake.signal();
-            }
-            return;
-        }
-
-        auto sendPod = [this] (const ThruPod& pod)
-        {
-            if (pod.size == 0 || pod.size > 3)
-                return;
+        if (pod.size > 0 && pod.size <= 3)
             sendMessageNowLocked (juce::MidiMessage (pod.data, (int) pod.size));
-        };
-
-        for (int i = 0; i < size1; ++i)
-            sendPod (thruRing[(size_t) (start1 + i)]);
-        for (int i = 0; i < size2; ++i)
-            sendPod (thruRing[(size_t) (start2 + i)]);
-
-        thruFifo.finishedRead (total);
+        sentAny = true;
     }
+
+    thruFlushQueued.store (false, std::memory_order_release);
+    if (thruRing.numReady() > 0)
+    {
+        bool expected = false;
+        if (thruFlushQueued.compare_exchange_strong (expected, true, std::memory_order_acq_rel))
+            thruWake.signal();
+    }
+    juce::ignoreUnused (sentAny);
 }
 
 int MidiDeviceManager::getMorphWireBusyRemainingMs() const
@@ -387,7 +410,7 @@ void MidiDeviceManager::setChannel (int channel1to16)
 void MidiDeviceManager::setMorphStreamMode (MorphStreamMode m)
 {
     morph.setStreamMode (m);
-    ensureMorphTimer();
+    ensureHostPumpTimer();
 }
 
 void MidiDeviceManager::setMorphByteBudget (int bytes)
@@ -399,7 +422,7 @@ void MidiDeviceManager::syncNotesSounding (bool sounding)
 {
     // Thru held notes are OR'd here so MorphTransport is only written from the message thread.
     updateNotesSounding (sounding || hasThruNotesSounding());
-    ensureMorphTimer();
+    ensureHostPumpTimer();
 }
 
 void MidiDeviceManager::ensureBackgroundThread()
@@ -411,19 +434,66 @@ void MidiDeviceManager::ensureBackgroundThread()
     }
 }
 
-void MidiDeviceManager::ensureMorphTimer()
+void MidiDeviceManager::ensureHostPumpTimer()
 {
+    if (juce::MessageManager::getInstanceWithoutCreating() == nullptr)
+        return;
+
     const double now = juce::Time::getMillisecondCounterHiRes();
-    const bool needWork = morph.pendingDiffCount() > 0
-                       || (morph.hasTarget() && ! morph.hasBaseline())
-                       || now < morphBusyUntilMs;
-    if (needWork && ! isTimerRunning())
-        startTimer (kMorphTickMs);
+    const bool needMorph = morph.pendingDiffCount() > 0
+                        || (morph.hasTarget() && ! morph.hasBaseline())
+                        || now < morphBusyUntilMs;
+    const bool needIn = hostInRing.numReady() > 0;
+    const bool needHostPorts = hostDeviceInput || hostControllerInput
+                            || hostOutput.load (std::memory_order_relaxed);
+    const bool needPumpFn = static_cast<bool> (messagePumpFn);
+    if ((needMorph || needIn || needHostPorts || needPumpFn) && ! isTimerRunning())
+        startTimer (kHostPumpMs);
+}
+
+void MidiDeviceManager::setMessageThreadPump (MessagePumpFn fn)
+{
+    messagePumpFn = std::move (fn);
+    ensureHostPumpTimer();
+}
+
+bool MidiDeviceManager::testPushDeviceSysex (const uint8_t* data, int size, bool fragment)
+{
+    if (! hostDeviceInput)
+        return false;
+    const bool ok = hostInRing.tryPushSysex (data, size, 0, 0.0, fragment);
+    if (ok)
+        hostInSysexOpen.store (fragment, std::memory_order_relaxed);
+    else
+        flagHostOverflow();
+    return ok;
+}
+
+void MidiDeviceManager::flagHostOverflow()
+{
+    hostOverflowPending.store (true, std::memory_order_relaxed);
+}
+
+void MidiDeviceManager::reportHostOverflowStatus()
+{
+    const uint64_t inSyx = hostInRing.droppedSysex();
+    const uint64_t outSyx = hostOutSysex.droppedSysex();
+    const uint64_t inEv = hostInRing.droppedEvents();
+    const bool flagged = hostOverflowPending.exchange (false, std::memory_order_acq_rel);
+    const bool newDrops = inSyx > lastReportedInDroppedSysex
+                       || outSyx > lastReportedOutDroppedSysex
+                       || inEv > lastReportedInDroppedEvents;
+    if (! flagged && ! newDrops)
+        return;
+    lastReportedInDroppedSysex = inSyx;
+    lastReportedOutDroppedSysex = outSyx;
+    lastReportedInDroppedEvents = inEv;
+    setStatus ("Host SysEx dropped — use hardware port");
 }
 
 bool MidiDeviceManager::hasOutput() const
 {
-    return output != nullptr || hostOutput;
+    return output != nullptr || hostOutput.load (std::memory_order_relaxed);
 }
 
 bool MidiDeviceManager::hasDeviceInput() const
@@ -431,42 +501,67 @@ bool MidiDeviceManager::hasDeviceInput() const
     return input != nullptr || hostDeviceInput;
 }
 
-void MidiDeviceManager::enqueueHostOutput (const juce::MidiMessage& message, double dueMs)
+bool MidiDeviceManager::enqueueHostShort (const uint8_t* data, int size, int sampleOffset)
 {
-    const juce::ScopedLock sl (hostOutLock);
-    hostOutQueue.push_back ({ message, dueMs });
+    std::lock_guard<std::mutex> lock (hostOutProduceMutex);
+    return hostOutShort.tryPush (data, size, sampleOffset);
+}
+
+bool MidiDeviceManager::enqueueHostSysex (const uint8_t* data, int size, double dueMs)
+{
+    std::lock_guard<std::mutex> lock (hostOutProduceMutex);
+    const bool ok = hostOutSysex.tryPushSysex (data, size, 0, dueMs, false);
+    if (! ok)
+        reportHostOverflowStatus();
+    return ok;
 }
 
 void MidiDeviceManager::exchangeHostMidi (juce::MidiBuffer& midiMessages)
 {
+    audioHostMidiDepth.fetch_add (1, std::memory_order_acq_rel);
+    hostThruScratchCount = 0;
     processHostMidiInput (midiMessages);
     midiMessages.clear();
     collectHostMidiOutput (midiMessages);
+    audioHostMidiDepth.fetch_sub (1, std::memory_order_acq_rel);
 }
 
 void MidiDeviceManager::collectHostMidiOutput (juce::MidiBuffer& midiMessages)
 {
-    if (! hostOutput)
+    if (! hostOutput.load (std::memory_order_acquire))
         return;
 
-    const juce::ScopedLock sl (hostOutLock);
-    if (hostOutQueue.empty())
+    HostShortOutRing::Pod shortPod;
+    while (hostOutShort.pop (shortPod))
+        midiMessages.addEvent (shortPod.data, (int) shortPod.size, shortPod.sampleOffset);
+
+    for (int i = 0; i < hostThruScratchCount; ++i)
+    {
+        const auto& p = hostThruScratch[(size_t) i];
+        if (p.size > 0)
+            midiMessages.addEvent (p.data, (int) p.size, p.sampleOffset);
+    }
+    hostThruScratchCount = 0;
+
+    if (hostOutSysex.empty())
         return;
 
     const double now = juce::Time::getMillisecondCounterHiRes();
-    size_t keep = 0;
-    for (size_t i = 0; i < hostOutQueue.size(); ++i)
+    int largeSysexThisBlock = 0;
+    RtMidiEvent ev;
+    for (;;)
     {
-        if (hostOutQueue[i].dueMs <= now)
-        {
-            midiMessages.addEvent (hostOutQueue[i].message, 0);
-            continue;
-        }
-        if (keep != i)
-            hostOutQueue[keep] = std::move (hostOutQueue[i]);
-        ++keep;
+        const RtMidiEvent* head = hostOutSysex.peek();
+        if (head == nullptr || head->dueMs > now)
+            break;
+        if ((int) head->size >= kLargeSysexBytes && largeSysexThisBlock >= 1)
+            break;
+        if (! hostOutSysex.popCopy (ev, hostCollectScratch.data(), (int) hostCollectScratch.size()))
+            break;
+        midiMessages.addEvent (hostCollectScratch.data(), (int) ev.size, ev.sampleOffset);
+        if ((int) ev.size >= kLargeSysexBytes)
+            ++largeSysexThisBlock;
     }
-    hostOutQueue.resize (keep);
 }
 
 void MidiDeviceManager::handleDeviceSysex (const juce::MidiMessage& message)
@@ -486,59 +581,121 @@ void MidiDeviceManager::handleDeviceSysex (const juce::MidiMessage& message)
         sysexFn (full);
 }
 
-void MidiDeviceManager::thruControllerMessageIfEnabled (const juce::MidiMessage& message)
+void MidiDeviceManager::handleDeviceSysexBytes (const uint8_t* data, int size, bool fragment)
 {
-    const bool isNoteOn = message.isNoteOn() && message.getVelocity() > 0;
-    const bool isNoteOff = message.isNoteOff()
-                        || (message.isNoteOn() && message.getVelocity() == 0);
-    const int note = message.getNoteNumber();
-    const bool skipNoteThru = controllerNotesToCallbacksOnly.load (std::memory_order_relaxed)
-                           && (isNoteOn || isNoteOff);
-    if (! controllerThru.load (std::memory_order_relaxed) || ! hasOutput()
-        || message.isSysEx() || skipNoteThru)
+    if (data == nullptr || size <= 0)
         return;
 
-    // Host out: same-block thru via the host queue — never touch hardware from here.
-    if (hostOutput)
+    // Raw bytes may be full F0..F7 or a bare SysEx body / fragment from the host.
+    const bool startsF0 = data[0] == 0xf0;
+    const bool endsF7 = data[size - 1] == 0xf7;
+
+    if (! fragment && startsF0 && endsF7)
     {
-        enqueueHostOutput (message);
-        if (isNoteOn)
-            setThruHeldNoteBit (note, true);
-        else if (isNoteOff)
-            setThruHeldNoteBit (note, false);
+        std::vector<uint8_t> full (data, data + size);
+        if (sysexFn)
+            sysexFn (full);
+        hostSysexReassembly.clear();
         return;
     }
 
-    // Hardware out: copy raw bytes into the POD ring; flush on the thru worker thread.
-    // Overflow: drop the event. Prefer clearing note-off held bits over stuck notes under flood.
+    if (startsF0)
+        hostSysexReassembly.assign (data, data + size);
+    else if (! hostSysexReassembly.empty())
+        hostSysexReassembly.insert (hostSysexReassembly.end(), data, data + size);
+    else
+    {
+        // Bare body (JUCE MidiMessage SysEx layout without F0/F7).
+        hostSysexReassembly.clear();
+        hostSysexReassembly.push_back (0xf0);
+        hostSysexReassembly.insert (hostSysexReassembly.end(), data, data + size);
+        if (! fragment)
+            hostSysexReassembly.push_back (0xf7);
+    }
+
+    if (! fragment || endsF7)
+    {
+        if (! hostSysexReassembly.empty() && hostSysexReassembly.back() != 0xf7)
+            hostSysexReassembly.push_back (0xf7);
+        if (sysexFn)
+            sysexFn (hostSysexReassembly);
+        hostSysexReassembly.clear();
+    }
+}
+
+void MidiDeviceManager::thruControllerMessageIfEnabled (const juce::MidiMessage& message,
+                                                        int sampleOffset,
+                                                        bool useBlockThruScratch)
+{
+    if (message.isSysEx())
+        return;
     const auto* raw = message.getRawData();
     const int rawSize = message.getRawDataSize();
+    thruControllerRawIfEnabled (raw, rawSize, sampleOffset, useBlockThruScratch);
+}
+
+void MidiDeviceManager::thruControllerRawIfEnabled (const uint8_t* raw, int rawSize, int sampleOffset,
+                                                    bool useBlockThruScratch)
+{
     if (raw == nullptr || rawSize < 1 || rawSize > 3)
         return;
+    if (! controllerThru.load (std::memory_order_relaxed) || ! hasOutput())
+        return;
 
-    ThruPod pod;
-    pod.size = (uint8_t) rawSize;
-    for (int i = 0; i < rawSize; ++i)
-        pod.data[(size_t) i] = raw[i];
+    const bool noteOn = isNoteOnRaw (raw, rawSize);
+    const bool noteOff = isNoteOffRaw (raw, rawSize);
+    const int note = noteNumberRaw (raw, rawSize);
+    if (controllerNotesToCallbacksOnly.load (std::memory_order_relaxed) && (noteOn || noteOff))
+        return;
 
-    int start1 = 0, size1 = 0, start2 = 0, size2 = 0;
-    thruFifo.prepareToWrite (1, start1, size1, start2, size2);
-    if (size1 + size2 < 1)
+    const bool dawOut = hostOutput.load (std::memory_order_acquire);
+
+    if (dawOut && useBlockThruScratch)
     {
-        if (isNoteOff)
+        if (hostThruScratchCount < kHostThruScratchSlots)
+        {
+            auto& slot = hostThruScratch[(size_t) hostThruScratchCount++];
+            slot.size = (uint8_t) rawSize;
+            slot.sampleOffset = sampleOffset;
+            std::memcpy (slot.data, raw, (size_t) rawSize);
+        }
+        else if (noteOff)
+        {
+            setThruHeldNoteBit (note, false);
+            return;
+        }
+        else
+            return;
+
+        if (noteOn)
+            setThruHeldNoteBit (note, true);
+        else if (noteOff)
             setThruHeldNoteBit (note, false);
         return;
     }
 
-    thruRing[(size_t) start1] = pod;
-    thruFifo.finishedWrite (1);
+    if (dawOut)
+    {
+        enqueueHostShort (raw, rawSize, sampleOffset);
+        if (noteOn)
+            setThruHeldNoteBit (note, true);
+        else if (noteOff)
+            setThruHeldNoteBit (note, false);
+        return;
+    }
 
-    if (isNoteOn)
+    if (! thruRing.tryPush (raw, rawSize))
+    {
+        if (noteOff)
+            setThruHeldNoteBit (note, false);
+        return;
+    }
+
+    if (noteOn)
         setThruHeldNoteBit (note, true);
-    else if (isNoteOff)
+    else if (noteOff)
         setThruHeldNoteBit (note, false);
 
-    // Always arm a flush while the ring is non-empty (not only empty→nonempty).
     requestThruFlush();
 }
 
@@ -574,37 +731,76 @@ void MidiDeviceManager::processHostMidiInput (const juce::MidiBuffer& midiMessag
     if (! hostDeviceInput && ! hostControllerInput)
         return;
 
+    const bool thruOn = controllerThru.load (std::memory_order_relaxed);
+
     for (const auto metadata : midiMessages)
     {
-        const auto message = metadata.getMessage();
-        if (hostControllerInput && ! message.isSysEx())
+        const auto* raw = metadata.data;
+        const int rawSize = metadata.numBytes;
+        const int sampleOffset = metadata.samplePosition;
+        if (raw == nullptr || rawSize <= 0)
+            continue;
+
+        const auto statusByte = (uint8_t) raw[0];
+        const bool sysexCont = hostInSysexOpen.load (std::memory_order_relaxed) && statusByte < 0x80;
+        const bool looksSysex = statusByte == 0xf0 || statusByte == 0xf7 || sysexCont;
+
+        if (hostControllerInput && ! looksSysex && rawSize <= 3)
         {
-            thruControllerMessageIfEnabled (message);
-            juce::MessageManager::callAsync ([this, message, alive = alive]
+            if (thruOn)
+                thruControllerRawIfEnabled (raw, rawSize, sampleOffset, true);
+
+            if (! hostInRing.tryPushShort (raw, rawSize, sampleOffset))
             {
-                if (! alive->load())
-                    return;
-                handleControllerMessage (message, true);
-            });
+                if (isNoteOffRaw (raw, rawSize))
+                    setThruHeldNoteBit (noteNumberRaw (raw, rawSize), false);
+                flagHostOverflow();
+            }
         }
-        if (hostDeviceInput && message.isSysEx())
+
+        if (hostDeviceInput && looksSysex)
         {
-            juce::MessageManager::callAsync ([this, message, alive = alive]
-            {
-                if (! alive->load())
-                    return;
-                handleDeviceSysex (message);
-            });
+            const bool endsF7 = (uint8_t) raw[rawSize - 1] == 0xf7;
+            const bool startsF0 = statusByte == 0xf0;
+            const bool fragment = (startsF0 || sysexCont) && ! endsF7;
+            if (! hostInRing.tryPushSysex (raw, rawSize, sampleOffset, 0.0, fragment))
+                flagHostOverflow();
+            else
+                hostInSysexOpen.store (fragment, std::memory_order_relaxed);
+        }
+    }
+}
+
+void MidiDeviceManager::pumpHostMidiInput()
+{
+    RtMidiEvent ev;
+    uint8_t scratch[HostMidiRing::kMaxSysexBytes];
+    while (hostInRing.popCopy (ev, scratch, (int) sizeof (scratch)))
+    {
+        if (ev.kind == RtMidiKind::shortMsg)
+        {
+            juce::MidiMessage msg (ev.shortData, (int) ev.size, 0.0);
+            handleControllerMessage (msg, true);
+        }
+        else
+        {
+            handleDeviceSysexBytes (scratch, (int) ev.size,
+                                    ev.kind == RtMidiKind::sysexFragment);
         }
     }
 }
 
 bool MidiDeviceManager::sendMessageNowLocked (const juce::MidiMessage& message)
 {
-    if (hostOutput)
+    if (hostOutput.load (std::memory_order_relaxed))
     {
-        enqueueHostOutput (message);
-        return true;
+        const auto* raw = message.getRawData();
+        const int n = message.getRawDataSize();
+        if (raw == nullptr || n <= 0)
+            return false;
+        if (message.isSysEx() || n > 3)
+            return enqueueHostSysex (raw, n, 0.0);
+        return enqueueHostShort (raw, n);
     }
     const juce::ScopedLock sl (outputLock);
     if (output == nullptr)
@@ -620,7 +816,7 @@ bool MidiDeviceManager::sendMessagesScheduled (const std::vector<std::vector<uin
     if (messages.empty())
         return true;
 
-    if (hostOutput)
+    if (hostOutput.load (std::memory_order_relaxed))
     {
         const double now = juce::Time::getMillisecondCounterHiRes();
         double t = juce::jmax (now, morphBusyUntilMs);
@@ -632,7 +828,8 @@ bool MidiDeviceManager::sendMessagesScheduled (const std::vector<std::vector<uin
         for (size_t i = 0; i < messages.size(); ++i)
         {
             const auto& bytes = messages[i];
-            enqueueHostOutput (juce::MidiMessage (bytes.data(), static_cast<int> (bytes.size())), t);
+            if (! enqueueHostSysex (bytes.data(), static_cast<int> (bytes.size()), t))
+                return false;
             t += static_cast<double> (wireMs (bytes));
             if (i + 1 < messages.size())
                 t += static_cast<double> (gap);
@@ -711,9 +908,8 @@ bool MidiDeviceManager::sendVoice (const VoiceData& voice, bool pace)
 void MidiDeviceManager::invalidateMorphBaseline()
 {
     morph.invalidateBaseline();
-    // Only spin the timer if there is a morph target waiting for a new baseline.
     if (morph.hasTarget())
-        ensureMorphTimer();
+        ensureHostPumpTimer();
 }
 
 bool MidiDeviceManager::sendMorphVoice (const VoiceData& voice, bool forceCommit, bool liveAllParams)
@@ -727,39 +923,45 @@ bool MidiDeviceManager::sendMorphVoice (const VoiceData& voice, bool forceCommit
     updateNotesSounding ((notesSoundingFn ? notesSoundingFn() : false) || hasThruNotesSounding());
 
     morph.setTarget (voice, forceCommit, liveAllParams);
-    ensureMorphTimer();
-
-    // Eager tick so idle commits feel immediate (no-op while the wire is busy).
+    ensureHostPumpTimer();
     timerCallback();
     return true;
 }
 
 void MidiDeviceManager::timerCallback()
 {
-    // Thru ring is drained by the dedicated flush worker (not the message thread).
+    if (hostInRing.numReady() > 0)
+        pumpHostMidiInput();
+
+    bool pumpWantsTimer = false;
+    if (messagePumpFn)
+        pumpWantsTimer = messagePumpFn();
+
+    reportHostOverflowStatus();
 
     const bool appSounding = notesSoundingFn ? notesSoundingFn() : false;
     updateNotesSounding (appSounding || hasThruNotesSounding());
 
     const double now = juce::Time::getMillisecondCounterHiRes();
     if (now < morphBusyUntilMs)
-        return; // Prior SysEx block still on the wire; keep the timer alive.
+        return;
 
+    const bool needHostPorts = hostDeviceInput || hostControllerInput
+                            || hostOutput.load (std::memory_order_relaxed);
     if (! morph.hasTarget() && ! morph.hasBaseline())
     {
-        stopTimer();
+        if (! needHostPorts && ! pumpWantsTimer && hostInRing.empty()
+            && juce::MessageManager::getInstanceWithoutCreating() != nullptr)
+            stopTimer();
         return;
     }
 
-    // Let the released note finish decaying before the backlog lands as a dump.
     if (morph.pendingDiffCount() > 0 && inMorphReleaseGuard())
         return;
 
     const auto slice = morph.tick();
     if (! slice.messages.empty())
     {
-        // Full dumps keep user pacing between start of dump and next traffic.
-        // Param diffs use a tight gap so one tick's slice finishes before the next.
         const int spacing = slice.usedFullDump ? juce::jmax (1, pacingMs) : 1;
         sendMessagesScheduled (slice.messages, spacing);
     }
@@ -767,7 +969,11 @@ void MidiDeviceManager::timerCallback()
     const double after = juce::Time::getMillisecondCounterHiRes();
     if (morph.pendingDiffCount() == 0
         && (morph.hasBaseline() || ! morph.hasTarget())
-        && after >= morphBusyUntilMs)
+        && after >= morphBusyUntilMs
+        && ! needHostPorts
+        && ! pumpWantsTimer
+        && hostInRing.empty()
+        && juce::MessageManager::getInstanceWithoutCreating() != nullptr)
         stopTimer();
 }
 
@@ -776,12 +982,9 @@ bool MidiDeviceManager::sendBank (const std::array<VoiceData, kBankVoiceCount>& 
     const auto ok = sendRaw (SysexMessages::makeBankDump (bank, channel));
     if (ok)
     {
-        // Bank dump replaces device memory; edit-buffer baseline is unknown.
-        // Invalidate without starting a morph dump until the bank finishes on the wire
-        // (busy-until covers the dump; ensureMorphTimer only if a target exists).
         morph.invalidateBaseline();
         if (morph.hasTarget())
-            ensureMorphTimer();
+            ensureHostPumpTimer();
         setStatus ("Sent 32-voice bank");
     }
     return ok;
