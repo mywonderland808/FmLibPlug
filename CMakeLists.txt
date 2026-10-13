@@ -10,6 +10,7 @@ option(FMLIBPLUG_BUILD_CLAP "Build CLAP via clap-juce-extensions" ON)
 option(FMLIBPLUG_BUILD_TESTS "Build unit tests, SysEx smoke tool, and hardware MIDI harness" ON)
 option(FMLIBPLUG_BUILD_AUV3 "Request AUv3 format (only if the toolchain supports it)" OFF)
 option(FMLIBPLUG_COPY_PLUGIN_AFTER_BUILD "Copy plugins into system plug-in folders after each format build" OFF)
+option(FMLIBPLUG_TSAN "Build unit tests with ThreadSanitizer (Linux/Clang/GCC)" OFF)
 
 include(FetchContent)
 
@@ -224,6 +225,8 @@ if(FMLIBPLUG_BUILD_TESTS)
     Tests/unit/MorphPresetStoreTests.cpp
     Tests/unit/HostIntegrationTests.cpp
     Tests/unit/MidiHostRoutingTests.cpp
+    Tests/unit/RtMidiRingTests.cpp
+    Tests/unit/RealtimeSafetyTests.cpp
     Tests/unit/AuditionHoldInputsTests.cpp
     Tests/unit/PatchLibraryTests.cpp
     Tests/unit/LibraryCacheTests.cpp
@@ -273,6 +276,10 @@ if(FMLIBPLUG_BUILD_TESTS)
       juce::juce_audio_devices
       juce::juce_audio_processors
   )
+  if(FMLIBPLUG_TSAN)
+    target_compile_options(FmLibPlugUnitTests PRIVATE -fsanitize=thread -g -O1)
+    target_link_options(FmLibPlugUnitTests PRIVATE -fsanitize=thread)
+  endif()
 
   add_test(NAME FmLibPlugUnit COMMAND FmLibPlugUnitTests)
   set_tests_properties(FmLibPlugUnit PROPERTIES LABELS "unit")
