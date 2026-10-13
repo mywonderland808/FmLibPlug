@@ -101,13 +101,14 @@ public:
             std::memcpy (arena.data() + (size_t) a1, data, (size_t) an1);
         if (an2 > 0)
             std::memcpy (arena.data() + (size_t) a2, data + an1, (size_t) an2);
-        arenaFifo.finishedWrite (size);
 
+        // Reserve the event slot before committing arena bytes. Never discardArenaBytes
+        // from the producer (that advances the consumer read tip).
         int start1 = 0, size1 = 0, start2 = 0, size2 = 0;
         eventFifo.prepareToWrite (1, start1, size1, start2, size2);
         if (size1 + size2 < 1)
         {
-            discardArenaBytes (size);
+            // Abandon the uncommitted arena prepareToWrite (no finishedWrite).
             droppedSysex_.fetch_add (1, std::memory_order_relaxed);
             return false;
         }
@@ -117,6 +118,7 @@ public:
         e.sampleOffset = sampleOffset;
         e.size = (uint32_t) size;
         e.dueMs = dueMs;
+        arenaFifo.finishedWrite (size);
         eventFifo.finishedWrite (1);
         return true;
     }
