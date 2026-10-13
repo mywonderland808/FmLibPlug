@@ -179,6 +179,8 @@ private:
     std::atomic<bool> hostMidiSuspended { false };
     std::atomic<int> audioHostMidiDepth { 0 };
     std::atomic<bool> hostInSysexOpen { false };
+    /** Message thread clears reassembly after an audio-side mid-fragment overflow. */
+    std::atomic<bool> hostInSysexAbort { false };
 
     HostMidiRing hostInRing;
     HostShortOutRing hostOutShort;

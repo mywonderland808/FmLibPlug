@@ -191,6 +191,7 @@ void MidiDeviceManager::clearHostRingsSafe()
     }
     hostThruScratchCount = 0;
     hostInSysexOpen.store (false, std::memory_order_relaxed);
+    hostInSysexAbort.store (false, std::memory_order_relaxed);
     hostSysexReassembly.clear();
     hostMidiSuspended.store (false, std::memory_order_release);
 }
@@ -482,7 +483,14 @@ bool MidiDeviceManager::testPushDeviceSysex (const uint8_t* data, int size, bool
     if (ok)
         hostInSysexOpen.store (fragment, std::memory_order_relaxed);
     else
+    {
         flagHostOverflow();
+        if (fragment || hostInSysexOpen.load (std::memory_order_relaxed))
+        {
+            hostInSysexOpen.store (false, std::memory_order_relaxed);
+            hostInSysexAbort.store (true, std::memory_order_release);
+        }
+    }
     return ok;
 }
 
@@ -783,7 +791,15 @@ void MidiDeviceManager::processHostMidiInput (const juce::MidiBuffer& midiMessag
             const bool startsF0 = statusByte == 0xf0;
             const bool fragment = (startsF0 || sysexCont) && ! endsF7;
             if (! hostInRing.tryPushSysex (raw, rawSize, sampleOffset, 0.0, fragment))
+            {
                 flagHostOverflow();
+                // Mid-stream drop: abort reassembly so a later F7 cannot deliver a gapped dump.
+                if (fragment || sysexCont || hostInSysexOpen.load (std::memory_order_relaxed))
+                {
+                    hostInSysexOpen.store (false, std::memory_order_relaxed);
+                    hostInSysexAbort.store (true, std::memory_order_release);
+                }
+            }
             else
                 hostInSysexOpen.store (fragment, std::memory_order_relaxed);
         }
@@ -792,6 +808,12 @@ void MidiDeviceManager::processHostMidiInput (const juce::MidiBuffer& midiMessag
 
 void MidiDeviceManager::pumpHostMidiInput()
 {
+    if (hostInSysexAbort.exchange (false, std::memory_order_acq_rel))
+    {
+        hostSysexReassembly.clear();
+        hostInSysexOpen.store (false, std::memory_order_relaxed);
+    }
+
     RtMidiEvent ev;
     uint8_t scratch[HostMidiRing::kMaxSysexBytes];
     while (hostInRing.popCopy (ev, scratch, (int) sizeof (scratch)))

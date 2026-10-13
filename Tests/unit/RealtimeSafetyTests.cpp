@@ -161,3 +161,48 @@ TEST_CASE ("collectHostMidiOutput with pending bulk stays allocation-free", "[mi
     }
     REQUIRE (buf.getNumEvents() >= 1);
 }
+
+TEST_CASE ("mid-fragment host overflow aborts reassembly", "[midi][rt]")
+{
+    MidiDeviceManager midi;
+    REQUIRE (midi.openInputByName (kDawMidiPortName));
+
+    int deliveries = 0;
+    std::vector<uint8_t> last;
+    midi.setSysexReceivedCallback ([&] (const std::vector<uint8_t>& bytes)
+    {
+        ++deliveries;
+        last = bytes;
+    });
+
+    const auto dump = SysexMessages::makeSingleVoiceDump (VoiceData {}, 1);
+    REQUIRE (dump.size() > 80);
+
+    REQUIRE (midi.testPushDeviceSysex (dump.data(), 40, true));
+
+    // Fill the in-ring until a fragment push fails (overflow).
+    std::vector<uint8_t> pad { 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07 };
+    int pushed = 0;
+    while (midi.testPushDeviceSysex (pad.data(), (int) pad.size(), true))
+        ++pushed;
+    REQUIRE (pushed > 0);
+
+    // Continuation ending in F7 must not complete a gapped dump after abort.
+    std::vector<uint8_t> tail (dump.begin() + 40, dump.end());
+    juce::MidiBuffer cont;
+    cont.addEvent (juce::MidiMessage (tail.data(), (int) tail.size()), 0);
+    midi.exchangeHostMidi (cont);
+
+    midi.pumpHostMidiInput();
+    REQUIRE (deliveries == 0); // no gapped / corrupt dump after mid-fragment overflow
+
+    // Fresh complete dump still works.
+    juce::MidiBuffer full;
+    full.addEvent (juce::MidiMessage (dump.data(), (int) dump.size()), 0);
+    midi.exchangeHostMidi (full);
+    midi.pumpHostMidiInput();
+    REQUIRE (deliveries == 1);
+    REQUIRE (last.size() == dump.size());
+    REQUIRE (last.front() == 0xf0);
+    REQUIRE (last.back() == 0xf7);
+}
