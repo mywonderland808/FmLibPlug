@@ -159,17 +159,17 @@ void PatchBrowser::rebuildColumns()
     auto& h = table.getHeader();
     h.removeAllColumns();
 
-    constexpr auto flags = juce::TableHeaderComponent::defaultFlags;
+    constexpr auto columnFlags = juce::TableHeaderComponent::defaultFlags;
     constexpr auto fixedStar = juce::TableHeaderComponent::notResizable;
 
     h.addColumn ("", 1, 28, 28, 28, fixedStar);
-    h.addColumn ("Patch", 2, 220, 80, -1, flags);
-    h.addColumn ("Slot", 5, 48, 40, 72, flags);
-    h.addColumn ("Tags", 6, 160, 60, -1, flags);
+    h.addColumn ("Patch", 2, 220, 80, -1, columnFlags);
+    h.addColumn ("Slot", 5, 48, 40, 72, columnFlags);
+    h.addColumn ("Tags", 6, 160, 60, -1, columnFlags);
     if (showFileColumns)
     {
-        h.addColumn ("File", 3, 140, 60, -1, flags);
-        h.addColumn ("Folder", 4, 160, 60, -1, flags);
+        h.addColumn ("File", 3, 140, 60, -1, columnFlags);
+        h.addColumn ("Folder", 4, 160, 60, -1, columnFlags);
     }
 
     h.setStretchToFitActive (false);
