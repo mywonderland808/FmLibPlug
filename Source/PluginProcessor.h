@@ -210,6 +210,14 @@ private:
     fmlib::MorphPreset liveMorph;
     bool liveCornerSet[4] { false, false, false, false };
     bool morphEgressPaused = false;
+    std::atomic<float>* morphXParam = nullptr;
+    std::atomic<float>* morphYParam = nullptr;
+    std::atomic<float>* lockRefXParam = nullptr;
+    std::atomic<float>* lockRefYParam = nullptr;
+    std::atomic<float>* morphLfoRateParam = nullptr;
+    std::atomic<float>* morphLfoSyncParam = nullptr;
+    std::atomic<float>* morphLfoDivisionParam = nullptr;
+    std::atomic<float>* morphMotionModeParam = nullptr;
     std::atomic<int> morphSelfWriteDepth { 0 };
     float morphLastWrittenX = -1.0f;
     float morphLastWrittenY = -1.0f;

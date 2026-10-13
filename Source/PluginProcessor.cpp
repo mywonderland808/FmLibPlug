@@ -143,6 +143,19 @@ juce::AudioProcessorValueTreeState::ParameterLayout FmLibPlugAudioProcessor::cre
 
 void FmLibPlugAudioProcessor::bindMorphParameters()
 {
+    morphXParam = apvts.getRawParameterValue (fmlib::kParamMorphX);
+    morphYParam = apvts.getRawParameterValue (fmlib::kParamMorphY);
+    lockRefXParam = apvts.getRawParameterValue (fmlib::kParamLockRefX);
+    lockRefYParam = apvts.getRawParameterValue (fmlib::kParamLockRefY);
+    morphLfoRateParam = apvts.getRawParameterValue (fmlib::kParamMorphLfoRate);
+    morphLfoSyncParam = apvts.getRawParameterValue (fmlib::kParamMorphLfoSync);
+    morphLfoDivisionParam = apvts.getRawParameterValue (fmlib::kParamMorphLfoDivision);
+    morphMotionModeParam = apvts.getRawParameterValue (fmlib::kParamMorphMotionMode);
+    jassert (morphXParam != nullptr && morphYParam != nullptr
+             && lockRefXParam != nullptr && lockRefYParam != nullptr
+             && morphLfoRateParam != nullptr && morphLfoSyncParam != nullptr
+             && morphLfoDivisionParam != nullptr && morphMotionModeParam != nullptr);
+
     apvts.addParameterListener (fmlib::kParamMorphX, this);
     apvts.addParameterListener (fmlib::kParamMorphY, this);
     apvts.addParameterListener (fmlib::kParamLockRefX, this);
@@ -398,58 +411,44 @@ void FmLibPlugAudioProcessor::setMorphEgressPaused (bool paused)
 
 float FmLibPlugAudioProcessor::getMorphX() const
 {
-    if (auto* p = apvts.getRawParameterValue (fmlib::kParamMorphX))
-        return p->load();
-    return 0.0f;
+    return morphXParam != nullptr ? morphXParam->load() : 0.0f;
 }
 
 float FmLibPlugAudioProcessor::getMorphY() const
 {
-    if (auto* p = apvts.getRawParameterValue (fmlib::kParamMorphY))
-        return p->load();
-    return 0.0f;
+    return morphYParam != nullptr ? morphYParam->load() : 0.0f;
 }
 
 float FmLibPlugAudioProcessor::getLockRefX() const
 {
-    if (auto* p = apvts.getRawParameterValue (fmlib::kParamLockRefX))
-        return p->load();
-    return 0.0f;
+    return lockRefXParam != nullptr ? lockRefXParam->load() : 0.0f;
 }
 
 float FmLibPlugAudioProcessor::getLockRefY() const
 {
-    if (auto* p = apvts.getRawParameterValue (fmlib::kParamLockRefY))
-        return p->load();
-    return 0.0f;
+    return lockRefYParam != nullptr ? lockRefYParam->load() : 0.0f;
 }
 
 float FmLibPlugAudioProcessor::getMorphLfoRate() const
 {
-    if (auto* p = apvts.getRawParameterValue (fmlib::kParamMorphLfoRate))
-        return p->load();
-    return 0.25f;
+    return morphLfoRateParam != nullptr ? morphLfoRateParam->load() : 0.25f;
 }
 
 bool FmLibPlugAudioProcessor::getMorphLfoSync() const
 {
-    if (auto* p = apvts.getRawParameterValue (fmlib::kParamMorphLfoSync))
-        return p->load() >= 0.5f;
-    return false;
+    return morphLfoSyncParam != nullptr && morphLfoSyncParam->load() >= 0.5f;
 }
 
 int FmLibPlugAudioProcessor::getMorphLfoDivision() const
 {
-    if (auto* p = apvts.getRawParameterValue (fmlib::kParamMorphLfoDivision))
-        return fmlib::clampMorphLfoDivision ((int) p->load());
+    if (morphLfoDivisionParam != nullptr)
+        return fmlib::clampMorphLfoDivision ((int) morphLfoDivisionParam->load());
     return fmlib::kMorphLfoDivisionDefault;
 }
 
 int FmLibPlugAudioProcessor::getMorphMotionChoice() const
 {
-    if (auto* p = apvts.getRawParameterValue (fmlib::kParamMorphMotionMode))
-        return (int) p->load();
-    return 0;
+    return morphMotionModeParam != nullptr ? (int) morphMotionModeParam->load() : 0;
 }
 
 void FmLibPlugAudioProcessor::setMorphPosition (float x, float y, bool beginGesture, bool endGesture)
