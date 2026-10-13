@@ -175,6 +175,8 @@ private:
     bool hostControllerInput = false;
     /** DAW out selected; also the audio-side gate (cleared before ring reset). */
     std::atomic<bool> hostOutput { false };
+    /** Gates audio host in/out while message thread resets SPSC rings. */
+    std::atomic<bool> hostMidiSuspended { false };
     std::atomic<int> audioHostMidiDepth { 0 };
     std::atomic<bool> hostInSysexOpen { false };
 

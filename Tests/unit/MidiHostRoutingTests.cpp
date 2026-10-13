@@ -2,6 +2,8 @@
 #include "midi/MidiPortNames.h"
 #include "sysex/Dx7Formats.h"
 #include <catch2/catch_test_macros.hpp>
+#include <atomic>
+#include <thread>
 
 using namespace fmlib;
 
@@ -114,6 +116,47 @@ TEST_CASE ("MIDI port reopen and close stay safe with controller thru enabled", 
     midi.close();
     REQUIRE_FALSE (midi.hasThruNotesSounding());
     REQUIRE_FALSE (midi.hasOutput());
+}
+
+TEST_CASE ("Host port clear stays safe while audio thread exchanges MIDI", "[midi][host][rt]")
+{
+    MidiDeviceManager midi;
+    REQUIRE (midi.openInputByName (kDawMidiPortName));
+    REQUIRE (midi.openControllerInputByName (kDawMidiPortName));
+    REQUIRE (midi.openOutputByName (kDawMidiPortName));
+
+    std::atomic<bool> run { true };
+    std::atomic<int> exchanges { 0 };
+    std::thread audio ([&]
+    {
+        while (run.load (std::memory_order_acquire))
+        {
+            juce::MidiBuffer buf;
+            buf.addEvent (juce::MidiMessage::controllerEvent (1, 1, 64), 0);
+            midi.exchangeHostMidi (buf);
+            exchanges.fetch_add (1, std::memory_order_relaxed);
+        }
+    });
+
+    while (exchanges.load (std::memory_order_relaxed) < 20)
+        std::this_thread::yield();
+
+    // Reopen / clear rings while audio is still in exchangeHostMidi.
+    for (int i = 0; i < 16; ++i)
+    {
+        REQUIRE (midi.openOutputByName (kDawMidiPortName));
+        REQUIRE (midi.openInputByName (kDawMidiPortName));
+        REQUIRE (midi.openControllerInputByName (kDawMidiPortName));
+    }
+
+    run.store (false, std::memory_order_release);
+    audio.join();
+
+    juce::MidiBuffer buf;
+    buf.addEvent (juce::MidiMessage::controllerEvent (1, 7, 100), 0);
+    midi.exchangeHostMidi (buf);
+    REQUIRE (midi.usesHostOutput());
+    midi.close();
 }
 
 TEST_CASE ("(DAW) SysEx pacing holds later packets for a later block", "[midi][host]")

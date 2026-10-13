@@ -158,12 +158,29 @@ bool MidiDeviceManager::openControllerInputByName (const juce::String& name)
 
 void MidiDeviceManager::clearHostRingsSafe()
 {
+    // Stop audio producers/consumers before AbstractFifo::reset (not SPSC-safe vs live R/W).
+    hostMidiSuspended.store (true, std::memory_order_release);
     hostOutput.store (false, std::memory_order_release);
-    for (int i = 0; i < 500 && audioHostMidiDepth.load (std::memory_order_acquire) > 0; ++i)
+
+    // Never reset while audio is inside exchangeHostMidi. If depth stays >0 (stuck callback),
+    // keep waiting — do not clear — but surface diagnostics after a few seconds.
+    bool warnedStuck = false;
+    const auto waitStart = std::chrono::steady_clock::now();
+    for (int i = 0; audioHostMidiDepth.load (std::memory_order_acquire) > 0; ++i)
     {
         std::this_thread::yield();
         if ((i & 63) == 63)
             std::this_thread::sleep_for (std::chrono::microseconds (50));
+        else if (i > 10'000)
+            std::this_thread::sleep_for (std::chrono::milliseconds (1));
+
+        if (! warnedStuck
+            && std::chrono::steady_clock::now() - waitStart > std::chrono::seconds (3))
+        {
+            warnedStuck = true;
+            jassertfalse; // audioHostMidiDepth stuck >0 while clearing host rings
+            setStatus ("MIDI: waiting for audio thread before host ring reset");
+        }
     }
 
     {
@@ -175,6 +192,7 @@ void MidiDeviceManager::clearHostRingsSafe()
     hostThruScratchCount = 0;
     hostInSysexOpen.store (false, std::memory_order_relaxed);
     hostSysexReassembly.clear();
+    hostMidiSuspended.store (false, std::memory_order_release);
 }
 
 bool MidiDeviceManager::openOutputByName (const juce::String& name)
@@ -459,7 +477,7 @@ void MidiDeviceManager::setMessageThreadPump (MessagePumpFn fn)
 
 bool MidiDeviceManager::testPushDeviceSysex (const uint8_t* data, int size, bool fragment)
 {
-    if (! hostDeviceInput)
+    if (! hostDeviceInput || hostMidiSuspended.load (std::memory_order_acquire))
         return false;
     const bool ok = hostInRing.tryPushSysex (data, size, 0, 0.0, fragment);
     if (ok)
@@ -728,6 +746,8 @@ void MidiDeviceManager::handleControllerMessage (const juce::MidiMessage& messag
 
 void MidiDeviceManager::processHostMidiInput (const juce::MidiBuffer& midiMessages)
 {
+    if (hostMidiSuspended.load (std::memory_order_acquire))
+        return;
     if (! hostDeviceInput && ! hostControllerInput)
         return;
 
