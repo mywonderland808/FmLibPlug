@@ -68,12 +68,11 @@ jobs:
       - name: Unit tests
         run: cmake --build build --config Release --target check
 
-  # Optional ThreadSanitizer job (ring / host MIDI stress). Non-blocking for merge.
+  # ThreadSanitizer job (ring / host MIDI stress). Blocking for merge.
   tsan:
     name: linux-tsan
     runs-on: ubuntu-latest
     timeout-minutes: 90
-    continue-on-error: true
     steps:
       - name: Checkout
         uses: actions/checkout@v4
