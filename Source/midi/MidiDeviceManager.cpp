@@ -83,7 +83,7 @@ bool MidiDeviceManager::openInputByName (const juce::String& name)
 {
     input.reset();
     inputName.clear();
-    hostDeviceInput = false;
+    hostDeviceInput.store (false, std::memory_order_release);
     if (name.isEmpty())
     {
         setStatus ("MIDI device input closed");
@@ -91,7 +91,7 @@ bool MidiDeviceManager::openInputByName (const juce::String& name)
     }
     if (isDawMidiPortName (name))
     {
-        hostDeviceInput = true;
+        hostDeviceInput.store (true, std::memory_order_release);
         inputName = name;
         ensureHostPumpTimer();
         setStatus ("MIDI in: " + name);
@@ -121,7 +121,7 @@ bool MidiDeviceManager::openControllerInputByName (const juce::String& name)
         controllerInput->stop();
     controllerInput.reset();
     controllerInputName.clear();
-    hostControllerInput = false;
+    hostControllerInput.store (false, std::memory_order_release);
     clearThruHeldNotes();
     discardThruRing();
     if (name.isEmpty())
@@ -132,7 +132,7 @@ bool MidiDeviceManager::openControllerInputByName (const juce::String& name)
     }
     if (isDawMidiPortName (name))
     {
-        hostControllerInput = true;
+        hostControllerInput.store (true, std::memory_order_release);
         controllerInputName = name;
         ensureHostPumpTimer();
         setStatus ("MIDI controller in: " + name);
@@ -189,7 +189,7 @@ void MidiDeviceManager::clearHostRingsSafe()
         hostOutSysex.clear();
         hostInRing.clear();
     }
-    hostThruScratchCount = 0;
+    // hostThruScratchCount is audio-thread only (reset on next exchangeHostMidi).
     hostInSysexOpen.store (false, std::memory_order_relaxed);
     hostInSysexAbort.store (false, std::memory_order_relaxed);
     hostSysexReassembly.clear();
@@ -275,8 +275,8 @@ void MidiDeviceManager::close()
     inputName.clear();
     controllerInputName.clear();
     outputName.clear();
-    hostDeviceInput = false;
-    hostControllerInput = false;
+    hostDeviceInput.store (false, std::memory_order_release);
+    hostControllerInput.store (false, std::memory_order_release);
     messagePumpFn = nullptr;
     clearHostRingsSafe();
     morphBusyUntilMs = 0.0;
@@ -462,7 +462,8 @@ void MidiDeviceManager::ensureHostPumpTimer()
                         || (morph.hasTarget() && ! morph.hasBaseline())
                         || now < morphBusyUntilMs;
     const bool needIn = hostInRing.numReady() > 0;
-    const bool needHostPorts = hostDeviceInput || hostControllerInput
+    const bool needHostPorts = hostDeviceInput.load (std::memory_order_relaxed)
+                            || hostControllerInput.load (std::memory_order_relaxed)
                             || hostOutput.load (std::memory_order_relaxed);
     const bool needPumpFn = static_cast<bool> (messagePumpFn);
     if ((needMorph || needIn || needHostPorts || needPumpFn) && ! isTimerRunning())
@@ -477,7 +478,8 @@ void MidiDeviceManager::setMessageThreadPump (MessagePumpFn fn)
 
 bool MidiDeviceManager::testPushDeviceSysex (const uint8_t* data, int size, bool fragment)
 {
-    if (! hostDeviceInput || hostMidiSuspended.load (std::memory_order_acquire))
+    if (! hostDeviceInput.load (std::memory_order_relaxed)
+        || hostMidiSuspended.load (std::memory_order_acquire))
         return false;
     const bool ok = hostInRing.tryPushSysex (data, size, 0, 0.0, fragment);
     if (ok)
@@ -523,7 +525,7 @@ bool MidiDeviceManager::hasOutput() const
 
 bool MidiDeviceManager::hasDeviceInput() const
 {
-    return input != nullptr || hostDeviceInput;
+    return input != nullptr || hostDeviceInput.load (std::memory_order_relaxed);
 }
 
 bool MidiDeviceManager::enqueueHostShort (const uint8_t* data, int size, int sampleOffset)
@@ -755,7 +757,11 @@ void MidiDeviceManager::processHostMidiInput (const juce::MidiBuffer& midiMessag
 {
     if (hostMidiSuspended.load (std::memory_order_acquire))
         return;
-    if (! hostDeviceInput && ! hostControllerInput)
+
+    // Snapshot once so mid-call open/close cannot tear the loop.
+    const bool deviceIn = hostDeviceInput.load (std::memory_order_acquire);
+    const bool controllerIn = hostControllerInput.load (std::memory_order_acquire);
+    if (! deviceIn && ! controllerIn)
         return;
 
     const bool thruOn = controllerThru.load (std::memory_order_relaxed);
@@ -772,7 +778,7 @@ void MidiDeviceManager::processHostMidiInput (const juce::MidiBuffer& midiMessag
         const bool sysexCont = hostInSysexOpen.load (std::memory_order_relaxed) && statusByte < 0x80;
         const bool looksSysex = statusByte == 0xf0 || statusByte == 0xf7 || sysexCont;
 
-        if (hostControllerInput && ! looksSysex && rawSize <= 3)
+        if (controllerIn && ! looksSysex && rawSize <= 3)
         {
             if (thruOn)
                 thruControllerRawIfEnabled (raw, rawSize, sampleOffset, true);
@@ -785,7 +791,7 @@ void MidiDeviceManager::processHostMidiInput (const juce::MidiBuffer& midiMessag
             }
         }
 
-        if (hostDeviceInput && looksSysex)
+        if (deviceIn && looksSysex)
         {
             const bool endsF7 = (uint8_t) raw[rawSize - 1] == 0xf7;
             const bool startsF0 = statusByte == 0xf0;
@@ -987,7 +993,8 @@ void MidiDeviceManager::timerCallback()
     if (now < morphBusyUntilMs)
         return;
 
-    const bool needHostPorts = hostDeviceInput || hostControllerInput
+    const bool needHostPorts = hostDeviceInput.load (std::memory_order_relaxed)
+                            || hostControllerInput.load (std::memory_order_relaxed)
                             || hostOutput.load (std::memory_order_relaxed);
     if (! morph.hasTarget() && ! morph.hasBaseline())
     {

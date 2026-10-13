@@ -40,8 +40,8 @@ public:
     bool openOutputByName (const juce::String& name);
     void close();
 
-    bool usesHostDeviceInput() const { return hostDeviceInput; }
-    bool usesHostControllerInput() const { return hostControllerInput; }
+    bool usesHostDeviceInput() const { return hostDeviceInput.load (std::memory_order_relaxed); }
+    bool usesHostControllerInput() const { return hostControllerInput.load (std::memory_order_relaxed); }
     bool usesHostOutput() const { return hostOutput.load (std::memory_order_relaxed); }
 
     /**
@@ -171,8 +171,8 @@ private:
     std::unique_ptr<juce::MidiInput> controllerInput;
     std::unique_ptr<juce::MidiOutput> output;
     juce::String inputName, controllerInputName, outputName;
-    bool hostDeviceInput = false;
-    bool hostControllerInput = false;
+    std::atomic<bool> hostDeviceInput { false };
+    std::atomic<bool> hostControllerInput { false };
     /** DAW out selected; also the audio-side gate (cleared before ring reset). */
     std::atomic<bool> hostOutput { false };
     /** Gates audio host in/out while message thread resets SPSC rings. */
