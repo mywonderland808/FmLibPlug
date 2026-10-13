@@ -67,3 +67,45 @@ jobs:
 
       - name: Unit tests
         run: cmake --build build --config Release --target check
+
+  # Optional ThreadSanitizer job (ring / host MIDI stress). Non-blocking for merge.
+  tsan:
+    name: linux-tsan
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Linux packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build git pkg-config \
+            libasound2-dev \
+            libfreetype-dev libfontconfig1-dev \
+            libx11-dev libxcomposite-dev libxcursor-dev libxext-dev \
+            libxinerama-dev libxrandr-dev libxrender-dev
+
+      - name: Cache FetchContent deps
+        uses: actions/cache@v4
+        with:
+          path: build-tsan/_deps
+          key: fetchcontent-tsan-${{ runner.os }}-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: |
+            fetchcontent-tsan-${{ runner.os }}-
+
+      - name: Configure (TSan, tests only)
+        run: |
+          cmake -S . -B build-tsan -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DFMLIBPLUG_BUILD_TESTS=ON \
+            -DFMLIBPLUG_BUILD_CLAP=OFF \
+            -DFMLIBPLUG_TSAN=ON
+
+      - name: Build unit tests
+        run: cmake --build build-tsan --target FmLibPlugUnitTests -j"$(nproc)"
+
+      - name: Ring and host MIDI tests under TSan
+        run: ./build-tsan/FmLibPlugUnitTests "[midi]"
