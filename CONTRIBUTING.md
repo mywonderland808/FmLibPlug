@@ -11,15 +11,23 @@ Thanks for helping improve this AGPL-3.0 project.
 
 ## Development
 
+Install the OS toolchain and packages first — see **Install dependencies** in [README.md](README.md). Cross-platform notes: [docs/PLATFORM.md](docs/PLATFORM.md). macOS codesign checklist: [docs/CODESIGN.md](docs/CODESIGN.md).
+
 ```bash
 make configure        # or configure-release
 make build
-make check            # unit tests (no MIDI)
+make check            # unit tests only — enough before opening a PR
 ```
 
-Optional: `make check-smoke` (local `Presets/`), `make check-hw` (hardware; copy `Tests/hw-midi.local.json.example`).
+### Tests
 
-Cross-platform notes: [docs/PLATFORM.md](docs/PLATFORM.md). macOS codesign checklist: [docs/CODESIGN.md](docs/CODESIGN.md).
+| Target | What it covers | Needs |
+|--------|----------------|--------|
+| `make check` | Unit tests (`ctest -L unit`) | In-tree `Tests/fixtures/` only |
+| `make check-smoke` | SysEx parse over a local corpus | Local `Presets/` (gitignored) |
+| `make check-hw` | Hardware MIDI round-trip | TX7/DX7 + `Tests/hw-midi.local.json` |
+
+Copy `Tests/hw-midi.local.json.example` → `Tests/hw-midi.local.json` before `check-hw`. Smoke and hardware are optional for day-to-day PRs; unit tests are required.
 
 ## Commit messages
 

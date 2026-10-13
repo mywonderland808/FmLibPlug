@@ -46,7 +46,63 @@ Note morph jumps on the first key of a phrase and delays that note-on so the Sys
 
 - CMake ≥ 3.22
 - C++17 compiler (Xcode Clang / MSVC / GCC)
-- Network on first configure (FetchContent: JUCE 8.0.14, clap-juce-extensions @ `c1a5ad0`, Catch2 v3.5.4)
+- Git + network on first configure (FetchContent: JUCE 8.0.14, clap-juce-extensions @ `c1a5ad0`, Catch2 v3.5.4)
+
+Plugin targets set `JUCE_WEB_BROWSER=0` and `JUCE_USE_CURL=0`. JACK stays off (`JUCE_JACK` defaults to 0 in JUCE 8). You do **not** need WebKit, CURL, JACK, LADSPA, or OpenGL packages to build FmLibPlug.
+
+### Install dependencies
+
+#### macOS
+
+```bash
+xcode-select --install          # Apple Clang + SDKs (once)
+brew install cmake git          # Homebrew: https://brew.sh
+```
+
+Full Xcode.app is fine too; Command Line Tools alone usually suffice for CLI builds.
+
+#### Linux
+
+Minimal set for this project: toolchain + **ALSA** + **FreeType/Fontconfig** + **X11** (what `juce_audio_devices` / `juce_graphics` / `juce_gui_basics` need). Debian/Fedora use split `-dev`/`-devel` packages for headers; Arch packages usually include headers in the same package.
+
+```bash
+# Debian / Ubuntu
+sudo apt update
+sudo apt install -y build-essential cmake git pkg-config \
+  libasound2-dev \
+  libfreetype-dev libfontconfig1-dev \
+  libx11-dev libxcomposite-dev libxcursor-dev libxext-dev \
+  libxinerama-dev libxrandr-dev libxrender-dev
+```
+
+```bash
+# Fedora
+sudo dnf install -y gcc-c++ cmake git pkgconf-pkg-config \
+  alsa-lib-devel \
+  freetype-devel fontconfig-devel \
+  libX11-devel libXcomposite-devel libXcursor-devel libXext-devel \
+  libXinerama-devel libXrandr-devel libXrender-devel
+```
+
+```bash
+# Arch
+sudo pacman -S --needed base-devel cmake git pkgconf \
+  alsa-lib freetype2 fontconfig \
+  libx11 libxcomposite libxcursor libxext libxinerama libxrandr libxrender
+```
+
+If `libfreetype-dev` is missing, try `libfreetype6-dev`. Full optional JUCE module list (WebKit, JACK, CURL, …): [JUCE Linux Dependencies](https://github.com/juce-framework/JUCE/blob/8.0.14/docs/Linux%20Dependencies.md) — only needed if you enable those features.
+
+#### Windows
+
+1. Install [Git for Windows](https://git-scm.com/download/win).
+2. Install [CMake](https://cmake.org/download/) (≥ 3.22) and enable “Add CMake to the system PATH”.
+3. Install [Visual Studio 2022](https://visualstudio.microsoft.com/) (Community is fine) with the **Desktop development with C++** workload, or VS Build Tools with the same MSVC + Windows SDK components.
+4. Optional: [Ninja](https://ninja-build.org/) for faster builds (`winget install Ninja-build.Ninja`).
+
+Open **x64 Native Tools Command Prompt for VS 2022** (or a PowerShell where `cmake` and the MSVC toolset are on `PATH`), then use the Windows build steps below. Git Bash + `make` also works if you prefer the Unix flow.
+
+Cross-platform notes and host-install checklist: [docs/PLATFORM.md](docs/PLATFORM.md).
 
 ## Build
 
@@ -70,6 +126,16 @@ build/FmLibPlug_artefacts/Debug/   # or Release/
   CLAP/FmLibPlug.clap
 ```
 
+Run Standalone from the build tree (not installed by `make install`):
+
+```bash
+# macOS
+open build/FmLibPlug_artefacts/Release/Standalone/FmLibPlug.app
+
+# Linux
+./build/FmLibPlug_artefacts/Release/Standalone/FmLibPlug
+```
+
 Default install destinations (`make install`):
 
 | OS | VST3 | CLAP | LV2 | AU |
@@ -77,7 +143,7 @@ Default install destinations (`make install`):
 | macOS | `~/Library/Audio/Plug-Ins/VST3` | `…/CLAP` | `…/LV2` | `…/Components` |
 | Linux | `~/.vst3` | `~/.clap` | `~/.lv2` | — |
 
-Override with `VST3_DIR` / `CLAP_DIR` / `LV2_DIR` / `AU_DIR`. Standalone stays in the build tree. Quit the DAW fully after install; the UI shows version + build-id.
+Override with `VST3_DIR` / `CLAP_DIR` / `LV2_DIR` / `AU_DIR`. Quit the DAW fully after install; the UI shows version + build-id.
 
 - `make shared` — shared code library only (not host-loadable)
 - AUv3: `-DFMLIBPLUG_BUILD_AUV3=ON` (macOS; often unavailable on CLI toolchains)
@@ -85,24 +151,43 @@ Override with `VST3_DIR` / `CLAP_DIR` / `LV2_DIR` / `AU_DIR`. Standalone stays i
 
 ### Windows
 
+Prefer **Ninja** (single-config; `CMAKE_BUILD_TYPE` applies):
+
 ```powershell
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release `
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release `
+  -DFMLIBPLUG_BUILD_TESTS=ON -DFMLIBPLUG_BUILD_CLAP=ON
+cmake --build build -j
+powershell -ExecutionPolicy Bypass -File scripts\install-plugins.ps1 -Config Release
+```
+
+Or **Visual Studio 2022** (multi-config; omit `CMAKE_BUILD_TYPE`, always pass `--config`):
+
+```powershell
+cmake -S . -B build -G "Visual Studio 17 2022" -A x64 `
   -DFMLIBPLUG_BUILD_TESTS=ON -DFMLIBPLUG_BUILD_CLAP=ON
 cmake --build build --config Release -j
 powershell -ExecutionPolicy Bypass -File scripts\install-plugins.ps1 -Config Release
 ```
 
+Run Standalone (Release artefacts; use `Debug` if you configured Debug / built `--config Debug`):
+
+```powershell
+.\build\FmLibPlug_artefacts\Release\Standalone\FmLibPlug.exe
+```
+
 Defaults: `%CommonProgramFiles%\VST3`, `%CommonProgramFiles%\CLAP`, `%APPDATA%\LV2`. AU is Apple-only.
 
-**Status:** Windows and Linux paths are supported in scripts/docs but not yet verified on those machines — see the checklist in [docs/PLATFORM.md](docs/PLATFORM.md).
+**Status:** GitHub Actions verifies configure + Release build + unit tests on **macOS** and **Ubuntu**. Windows build/install and Linux/Windows **plugin install into hosts** are still checklist-only — see [docs/PLATFORM.md](docs/PLATFORM.md).
 
 ## Tests
 
 Requires `FMLIBPLUG_BUILD_TESTS=ON` (default). Targets match CMake.
 
+For a first green build, `make check` (unit tests only) is enough — fixtures under `Tests/fixtures/` ship in-tree. Smoke and hardware tests are optional.
+
 ```bash
-make check          # ctest -L unit
-make check-smoke    # ctest -L smoke (needs local Presets/)
+make check          # ctest -L unit (no MIDI, no local Presets/)
+make check-smoke    # ctest -L smoke (needs local Presets/; gitignored)
 make check-all      # unit + smoke
 ```
 

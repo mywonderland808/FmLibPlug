@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- README per-OS **Install dependencies** (macOS / Linux / Windows toolchain + JUCE system packages)
+- GitHub Actions CI (`.github/workflows/ci.yml`): Ninja Release build + unit tests on macOS and Ubuntu; `contents: read`; FetchContent cache
+- PLATFORM.md Standalone run commands; CONTRIBUTING test matrix (unit vs smoke vs hardware)
+
+### Changed
+- docs/PLATFORM.md version labels aligned to 1.3.x; clarify CI (macOS/Ubuntu compile) vs host-install checklist
+- Windows build docs prefer Ninja or explicit VS 2022 multi-config (`--config`) instead of bare `CMAKE_BUILD_TYPE`
+- Linux install lists trimmed to packages required for FmLibPlug (ALSA + FreeType/Fontconfig + X11); drop WebKit/JACK/CURL/OpenGL
+
+### Fixed
+- README no longer claims juceaide needs WebKit/CURL for this project
+
 ## [1.3.7] - 2026-09-29
 
 ### Added
