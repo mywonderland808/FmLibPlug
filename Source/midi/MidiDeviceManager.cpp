@@ -324,10 +324,12 @@ void MidiDeviceManager::ensureThruFlushThread()
     {
         while (! thruStop.load (std::memory_order_acquire) && aliveFlag->load())
         {
-            thruWake.wait (-1);
+            // Timed wait: audio must not call WaitableEvent::signal (mutex/condvar).
+            thruWake.wait (1);
             if (thruStop.load (std::memory_order_acquire) || ! aliveFlag->load())
                 break;
-            flushThruRing();
+            if (thruFlushQueued.load (std::memory_order_acquire))
+                flushThruRing();
         }
     });
 }
@@ -352,12 +354,9 @@ void MidiDeviceManager::stopThruFlushThread()
 
 void MidiDeviceManager::requestThruFlush()
 {
+    // Worker polls (~1 ms). Do not signal WaitableEvent from the audio thread.
     bool expected = false;
-    if (! thruFlushQueued.compare_exchange_strong (expected, true, std::memory_order_acq_rel))
-        return;
-
-    // Worker must already be running (started from openOutputByName). Audio only signals.
-    thruWake.signal();
+    thruFlushQueued.compare_exchange_strong (expected, true, std::memory_order_acq_rel);
 }
 
 void MidiDeviceManager::flushThruRing()
