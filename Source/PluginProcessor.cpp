@@ -529,6 +529,9 @@ void FmLibPlugAudioProcessor::drainMorphMessageWork()
         const bool dragEmit = morphApplyDragEmit.load (std::memory_order_relaxed);
         const bool allParams = morphApplyLiveAllPending.exchange (false, std::memory_order_acq_rel);
         const bool name = morphApplyUpdateNamePending.exchange (false, std::memory_order_acq_rel);
+        // Host chase only sets flags; APVTS atomics are the source of truth for pad position.
+        liveMorph.posX = getMorphX();
+        liveMorph.posY = getMorphY();
         applyLiveMorph (dragEmit, allParams, name);
         notifyMorphUiSync();
     }
@@ -538,6 +541,9 @@ void FmLibPlugAudioProcessor::drainMorphMessageWork()
         morphUiSyncPending.store (false, std::memory_order_release);
         morphLastUiSyncMs.store ((uint32_t) juce::Time::getMillisecondCounter(),
                                  std::memory_order_relaxed);
+        // Rate-limited chase notifies UI without apply — still refresh pad from APVTS.
+        liveMorph.posX = getMorphX();
+        liveMorph.posY = getMorphY();
         if (morphUiSync)
             morphUiSync();
         if (morphUiSyncDeferred.exchange (false, std::memory_order_acq_rel))
@@ -593,8 +599,7 @@ void FmLibPlugAudioProcessor::chaseHostMorphParameters()
     if (fmlib::morphPositionMatchesLastPluginWrite (x, y, morphLastWrittenX, morphLastWrittenY))
         return;
 
-    liveMorph.posX = x;
-    liveMorph.posY = y;
+    // Do not write liveMorph.pos* here (message thread reads it). Apply reads APVTS on drain.
     requestApplyLiveMorph (true, false,
                            fmlib::morphShouldUpdateLiveName (getMorphMotionChoice(), true));
 }
@@ -923,6 +928,8 @@ void FmLibPlugAudioProcessor::notifyMorphUiSync()
     {
         morphUiSyncPending.store (false, std::memory_order_relaxed);
         morphLastUiSyncMs.store (now, std::memory_order_relaxed);
+        liveMorph.posX = getMorphX();
+        liveMorph.posY = getMorphY();
         morphUiSync();
         if (morphUiSyncDeferred.exchange (false, std::memory_order_relaxed))
             notifyMorphUiSync();

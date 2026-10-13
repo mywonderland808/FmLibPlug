@@ -578,8 +578,9 @@ void FmLibPlugAudioProcessorEditor::syncMorphPanelFromProcessor()
     const bool full = motion != lastSyncedMotion
                    || live.lockGroups != lastSyncedLockGroups
                    || cornersReady != lastSyncedCornersReady;
-    morpher.setMarkerFromHost (live.posX, live.posY);
-    morpher.setLockRefFromHost (live.lockRefX, live.lockRefY);
+    // Pad / lock-ref markers: prefer APVTS atomics (host chase may notify UI without apply).
+    morpher.setMarkerFromHost (plugin.getMorphX(), plugin.getMorphY());
+    morpher.setLockRefFromHost (plugin.getLockRefX(), plugin.getLockRefY());
     if (! full)
         return;
 
