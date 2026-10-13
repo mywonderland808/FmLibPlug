@@ -30,6 +30,7 @@ public:
     void prepareToPlay (double, int) override {}
     void releaseResources() override {}
     bool isBusesLayoutSupported (const BusesLayout& layouts) const override;
+    using AudioProcessor::processBlock;
     void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
 
     juce::AudioProcessorEditor* createEditor() override;
@@ -63,6 +64,8 @@ public:
     fmlib::MidiDeviceManager midi;
 
     void applyPreferencesToEngine();
+    /** Audio-safe mirror of prefs.morphEmitMs (UI writes both). */
+    void setMorphEmitMsAtomic (int ms);
     /** Write settings.xml only (favorites, MIDI, folders, UI). Do not rewrite tags/morph presets. */
     void persistPreferences();
     void persistTags();
@@ -173,6 +176,7 @@ private:
     void publishMorphMotionPosition (float x, float y, bool dragEmit);
     void handleMorphPositionHostChange (const juce::String& parameterID, float newValue);
     void requestApplyLiveMorph (bool dragEmit, bool liveAllParams, bool updateName);
+    void drainMorphMessageWork();
     void chaseHostMorphParameters();
     void cacheHostTransport();
     bool isTransportPlaying() const;
@@ -215,12 +219,14 @@ private:
     fmlib::VoiceNameBytes frozenMorphName {};
     bool frozenMorphNameValid = false;
     std::atomic<bool> morphApplyPending { false };
+    std::atomic<bool> morphApplyDragEmit { true };
     std::atomic<bool> morphApplyLiveAllPending { false };
     std::atomic<bool> morphApplyUpdateNamePending { false };
     std::atomic<bool> morphUiSyncPending { false };
     std::atomic<bool> morphUiSyncDeferred { false };
     std::atomic<uint32_t> morphLastApplyMs { 0 };
     std::atomic<uint32_t> morphLastUiSyncMs { 0 };
+    std::atomic<int> morphEmitMsAtomic { 150 };
     std::atomic<double> hostBpm { 120.0 };
     std::atomic<double> hostPpq { 0.0 };
     std::atomic<bool> hostPlaying { false };

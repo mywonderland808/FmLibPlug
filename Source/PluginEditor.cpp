@@ -741,6 +741,7 @@ int FmLibPlugAudioProcessorEditor::previewNoteLeadMs() const
 void FmLibPlugAudioProcessorEditor::syncMorphPrefsFromSettings (bool persist)
 {
     plugin.prefs.morphEmitMs = settings.getMorphEmitMs();
+    plugin.setMorphEmitMsAtomic (plugin.prefs.morphEmitMs);
     plugin.prefs.morphReleaseGuardMs = settings.getMorphReleaseGuardMs();
     plugin.prefs.morphNoteSettleMs = settings.getMorphNoteSettleMs();
     plugin.prefs.midiControllerThru = settings.getMidiControllerThru();

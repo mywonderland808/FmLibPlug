@@ -70,6 +70,16 @@ FmLibPlugAudioProcessor::FmLibPlugAudioProcessor()
         else
             juce::MessageManager::callAsync (std::move (run));
     });
+
+    midi.setMessageThreadPump ([this, alive = alive]() -> bool
+    {
+        if (! alive->load())
+            return false;
+        drainMorphMessageWork();
+        return morphApplyPending.load (std::memory_order_relaxed)
+            || morphUiSyncPending.load (std::memory_order_relaxed)
+            || morphUiSyncDeferred.load (std::memory_order_relaxed);
+    });
 }
 
 FmLibPlugAudioProcessor::~FmLibPlugAudioProcessor()
@@ -93,6 +103,7 @@ FmLibPlugAudioProcessor::~FmLibPlugAudioProcessor()
     releaseAllControllerNotes();
     if (lastAuditionNote >= 0)
         midi.sendNoteOff (lastAuditionNote);
+    midi.setMessageThreadPump (nullptr);
     midi.setSysexReceivedCallback (nullptr);
     midi.setControllerNoteOnCallback (nullptr);
     midi.setControllerNoteOffCallback (nullptr);
@@ -188,6 +199,7 @@ bool FmLibPlugAudioProcessor::showDawMidiPorts() const
 void FmLibPlugAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
 {
     juce::ScopedNoDenormals noDenormals;
+    // Capacity should come from the host; avoid ensureSize here (may allocate).
     midi.exchangeHostMidi (midiMessages);
     cacheHostTransport();
     chaseHostMorphParameters();
@@ -247,6 +259,11 @@ void FmLibPlugAudioProcessor::restoreSessionFromState (const fmlib::PluginSessio
         notifyMorphUiSync();
 }
 
+void FmLibPlugAudioProcessor::setMorphEmitMsAtomic (int ms)
+{
+    morphEmitMsAtomic.store (juce::jlimit (20, 250, ms), std::memory_order_relaxed);
+}
+
 void FmLibPlugAudioProcessor::applyPreferencesToEngine()
 {
     library.setBaseFolders (prefs.enabledLibraryFolders());
@@ -256,8 +273,10 @@ void FmLibPlugAudioProcessor::applyPreferencesToEngine()
     midi.setMorphReleaseGuardMs (prefs.morphReleaseGuardMs);
     midi.setMorphStreamMode (static_cast<fmlib::MorphStreamMode> (
         juce::jlimit (0, 1, prefs.morphStreamMode)));
+    setMorphEmitMsAtomic (prefs.morphEmitMs);
     // ~one param-change per morphEmitMs slice at default budget; scale gently with emit ms.
-    const int budget = juce::jlimit (14, 70, (prefs.morphEmitMs <= 50 ? 56 : (prefs.morphEmitMs >= 200 ? 28 : 42)));
+    const int emitMs = morphEmitMsAtomic.load (std::memory_order_relaxed);
+    const int budget = juce::jlimit (14, 70, (emitMs <= 50 ? 56 : (emitMs >= 200 ? 28 : 42)));
     midi.setMorphByteBudget (budget);
     midi.setNotesSoundingQuery ([this] { return hasSoundingNotes(); });
     if (prefs.midiInputName.isNotEmpty())
@@ -504,6 +523,29 @@ void FmLibPlugAudioProcessor::handleMorphPositionHostChange (const juce::String&
                            fmlib::morphShouldUpdateLiveName (getMorphMotionChoice(), true));
 }
 
+void FmLibPlugAudioProcessor::drainMorphMessageWork()
+{
+    if (morphApplyPending.exchange (false, std::memory_order_acq_rel))
+    {
+        const bool dragEmit = morphApplyDragEmit.load (std::memory_order_relaxed);
+        const bool allParams = morphApplyLiveAllPending.exchange (false, std::memory_order_acq_rel);
+        const bool name = morphApplyUpdateNamePending.exchange (false, std::memory_order_acq_rel);
+        applyLiveMorph (dragEmit, allParams, name);
+        notifyMorphUiSync();
+    }
+
+    if (morphUiSyncPending.load (std::memory_order_acquire))
+    {
+        morphUiSyncPending.store (false, std::memory_order_release);
+        morphLastUiSyncMs.store ((uint32_t) juce::Time::getMillisecondCounter(),
+                                 std::memory_order_relaxed);
+        if (morphUiSync)
+            morphUiSync();
+        if (morphUiSyncDeferred.exchange (false, std::memory_order_acq_rel))
+            notifyMorphUiSync();
+    }
+}
+
 void FmLibPlugAudioProcessor::requestApplyLiveMorph (bool dragEmit, bool liveAllParams, bool updateName)
 {
     if (liveAllParams)
@@ -514,7 +556,8 @@ void FmLibPlugAudioProcessor::requestApplyLiveMorph (bool dragEmit, bool liveAll
     if (dragEmit && ! liveAllParams)
     {
         const auto now = (uint32_t) juce::Time::getMillisecondCounter();
-        const uint32_t minMs = (uint32_t) juce::jlimit (20, 250, prefs.morphEmitMs);
+        const uint32_t minMs = (uint32_t) juce::jlimit (
+            20, 250, morphEmitMsAtomic.load (std::memory_order_relaxed));
         const auto last = morphLastApplyMs.load (std::memory_order_relaxed);
         if (last != 0 && (now - last) < minMs)
         {
@@ -533,20 +576,8 @@ void FmLibPlugAudioProcessor::requestApplyLiveMorph (bool dragEmit, bool liveAll
         return;
     }
 
-    bool expected = false;
-    if (! morphApplyPending.compare_exchange_strong (expected, true))
-        return;
-
-    juce::MessageManager::callAsync ([this, dragEmit, alive = alive]
-    {
-        if (! alive->load())
-            return;
-        morphApplyPending = false;
-        const bool allParams = morphApplyLiveAllPending.exchange (false);
-        const bool name = morphApplyUpdateNamePending.exchange (false);
-        applyLiveMorph (dragEmit, allParams, name);
-        notifyMorphUiSync();
-    });
+    morphApplyDragEmit.store (dragEmit, std::memory_order_relaxed);
+    morphApplyPending.store (true, std::memory_order_release);
 }
 
 void FmLibPlugAudioProcessor::chaseHostMorphParameters()
@@ -686,10 +717,9 @@ void FmLibPlugAudioProcessor::updateMorphMotionEngine()
         if (! isTimerRunning() || getTimerInterval() != kMorphLfoTimerMs)
             startTimer (kMorphLfoTimerMs);
     }
-    else if (! isTimerRunning() || getTimerInterval() == kMorphLfoTimerMs)
+    else if (isTimerRunning() && getTimerInterval() == kMorphLfoTimerMs)
     {
-        if (getTimerInterval() == kMorphLfoTimerMs)
-            stopTimer();
+        stopTimer();
     }
 }
 
@@ -890,21 +920,16 @@ void FmLibPlugAudioProcessor::notifyMorphUiSync()
     if (! morphUiSyncPending.compare_exchange_strong (expected, true))
         return;
 
-    morphLastUiSyncMs.store (now, std::memory_order_relaxed);
-    auto run = [this, alive = alive]
+    if (juce::MessageManager::getInstance()->isThisTheMessageThread())
     {
-        if (! alive->load())
-            return;
         morphUiSyncPending.store (false, std::memory_order_relaxed);
-        if (morphUiSync)
-            morphUiSync();
+        morphLastUiSyncMs.store (now, std::memory_order_relaxed);
+        morphUiSync();
         if (morphUiSyncDeferred.exchange (false, std::memory_order_relaxed))
             notifyMorphUiSync();
-    };
-    if (juce::MessageManager::getInstance()->isThisTheMessageThread())
-        run();
-    else
-        juce::MessageManager::callAsync (std::move (run));
+        return;
+    }
+
 }
 
 void FmLibPlugAudioProcessor::sendVoice (const fmlib::VoiceData& voice)
