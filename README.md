@@ -8,21 +8,23 @@ Product name: **FmLibPlug**. Compatibility only: FM SysEx librarian for DX7 mkI 
 
 Yamaha, DX7, and TX7 are trademarks of Yamaha Corporation. FmLibPlug is an independent project and is **not affiliated with, endorsed by, or sponsored by Yamaha**. Provided **without warranty**; see [LICENSE](LICENSE).
 
-Do **not** commit or redistribute third-party voice banks or cartridges. Keep local `.syx` / `.dx7` libraries in gitignored folders (e.g. `Presets/`). Test fixtures under `Tests/fixtures/` are synthetic. Screenshots below use synthetic voice names only.
+Do **not** commit or redistribute third-party voice banks or cartridges. Keep local `.syx` / `.dx7` libraries in gitignored folders (e.g. `Presets/`). Test fixtures under `Tests/fixtures/` are synthetic.
 
 ## Screenshots
 
-Illustrative UI mockups (synthetic patch names only — not live captures of a DAW session):
+Standalone UI, captured from a local build (MIDI port names redacted in Settings):
 
-| Library browser | Morph pad |
-|-----------------|-----------|
-| ![Patch browser](docs/images/browser-dark.jpg) | ![Morph pad](docs/images/morph-pad-dark.jpg) |
+| Library + Device (dark) | Library + Device (light) |
+|-------------------------|--------------------------|
+| ![Library browser dark](docs/images/browser-dark.png) | ![Library browser light](docs/images/browser-light.png) |
 
-| TX7 Globals | Settings |
-|-------------|----------|
-| ![Globals](docs/images/globals-dark.jpg) | ![Settings](docs/images/settings-dark.jpg) |
+| Morph pad | Globals |
+|-----------|---------|
+| ![Morph pad](docs/images/morph-pad-dark.png) | ![Globals](docs/images/globals-dark.png) |
 
-Morph pad motion (illustrative SVG): ![Morph drag](docs/images/morph-drag.svg)
+| Settings |
+|----------|
+| ![Settings](docs/images/settings-dark.png) |
 
 ## Features
 

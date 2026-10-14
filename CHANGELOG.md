@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - PLATFORM.md Standalone run commands; CONTRIBUTING test matrix (unit vs smoke vs hardware)
 
 ### Changed
+- README screenshots replaced with real Standalone captures (dark + light library, morph, Globals, Settings; removed AI mockups and morph-drag SVG)
 - docs/PLATFORM.md version labels aligned to 1.3.x; clarify CI (macOS/Ubuntu compile) vs host-install checklist
 - Windows build docs prefer Ninja or explicit VS 2022 multi-config (`--config`) instead of bare `CMAKE_BUILD_TYPE`
 - Linux install lists trimmed to packages required for FmLibPlug (ALSA + FreeType/Fontconfig + X11); drop WebKit/JACK/CURL/OpenGL
