@@ -7,19 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.8] - 2026-10-14
+
 ### Added
-- README per-OS **Install dependencies** (macOS / Linux / Windows toolchain + JUCE system packages)
-- GitHub Actions CI (`.github/workflows/ci.yml`): Ninja Release build + unit tests on macOS and Ubuntu; `contents: read`; FetchContent cache
-- PLATFORM.md Standalone run commands; CONTRIBUTING test matrix (unit vs smoke vs hardware)
+- Real-time-safe DAW host MIDI in/out handoff (`RtMidiRing` / short MIDI rings); `(DAW)` bus path no longer depends on message-thread wait in the audio callback
+- GitHub Actions CI (macOS and Ubuntu Release + unit tests); optional Linux ThreadSanitizer job (blocking)
+- docs/THREADING.md; per-OS install-deps and clearer PLATFORM / CONTRIBUTING onboarding
 
 ### Changed
 - README screenshots replaced with real Standalone captures (dark + light library, morph, Globals, Settings; removed AI mockups and morph-drag SVG)
-- docs/PLATFORM.md version labels aligned to 1.3.x; clarify CI (macOS/Ubuntu compile) vs host-install checklist
-- Windows build docs prefer Ninja or explicit VS 2022 multi-config (`--config`) instead of bare `CMAKE_BUILD_TYPE`
-- Linux install lists trimmed to packages required for FmLibPlug (ALSA + FreeType/Fontconfig + X11); drop WebKit/JACK/CURL/OpenGL
+- Live morph drains SysEx via a message-thread MIDI pump; chase hot path caches APVTS raw pointers
+- PLATFORM / Windows build docs prefer Ninja or explicit VS 2022 multi-config; Linux package lists trimmed for FmLibPlug
 
 ### Fixed
-- README no longer claims juceaide needs WebKit/CURL for this project
+- Host SysEx reassembly aborts on mid-fragment overflow and discards post-abort continuations until the next `F0`
+- Host ring clear suspends producers with a seq_cst handshake; audio-only thru scratch reset; no `WaitableEvent` from the audio thread for thru wake
+- Morph position updates from audio no longer write `liveMorph` non-atomically
+- PatchBrowser `columnFlags` renamed to avoid `Component` member shadow
+- Host MidiBuffer / bulk SysEx residual risks documented; message-thread wait noted when audio is stuck during host clear
 
 ## [1.3.7] - 2026-09-29
 

@@ -1,6 +1,6 @@
 # FmLibPlug
 
-**Version 1.3.7** — AGPL-3.0 JUCE 8 MIDI librarian for **DX7 / TX7–compatible** voice SysEx.
+**Version 1.3.8** — AGPL-3.0 JUCE 8 MIDI librarian for **DX7 / TX7–compatible** voice SysEx.
 
 FmLibPlug browses multi-folder SysEx libraries, sends and receives DX7/TX7 voice and function data, and morphs four corner patches over MIDI — as a plugin (VST3/LV2/CLAP/AU) or Standalone. Audio is passthrough; the product is MIDI/SysEx I/O with a real-time-safe `(DAW)` host bus path.
 
